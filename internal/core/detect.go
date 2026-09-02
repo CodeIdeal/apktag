@@ -1,4 +1,4 @@
-package vasdolly
+package core
 
 import (
 	"fmt"

@@ -38,4 +38,16 @@ go test ./...
 go vet ./...
 ```
 
+项目按 Go 社区常见布局组织：
+
+```text
+.
+├── cmd/vasdolly/   # 命令行入口
+├── internal/core/  # APK 解析、签名检测与渠道转换实现
+├── docs/           # 设计、研究和维护文档
+└── vasdolly.go     # 稳定的公共 Go 接口
+```
+
+根包保留 `github.com/CodeIdeal/VasDolly-go` import path；不可供外部项目直接依赖的实现放在 `internal/core`。项目没有独立的第二套公共包，因此不创建 `pkg/`。
+
 运行时依赖 `github.com/agusibrahim/apksig-go v1.1.0`，不调用 Java、Android SDK、`apksigner` 或 CGO。

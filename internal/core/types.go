@@ -1,4 +1,4 @@
-package vasdolly
+package core
 
 // Mode selects the channel storage scheme.
 type Mode string
