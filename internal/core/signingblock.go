@@ -2,7 +2,9 @@ package core
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/agusibrahim/apksig-go/pkg/apksigblock"
@@ -11,6 +13,7 @@ import (
 // ChannelPairID is the VasDolly ID-value pair identifier used in an APK
 // Signing Block.
 const ChannelPairID uint32 = 0x881155ff
+const WallePairID uint32 = 0x71777777
 
 const channelPairID = ChannelPairID
 
@@ -26,22 +29,64 @@ func modernPair(blockPairs []apksigblock.Pair) (hasV2, hasV3 bool) {
 	return hasV2, hasV3
 }
 
-func channelPair(block *apksigblock.Block) (value []byte, found bool, err error) {
+func normalizeBlockID(id uint32) uint32 {
+	if id == 0 {
+		return ChannelPairID
+	}
+	return id
+}
+
+// ValidateBlockID rejects IDs whose values have Android-defined semantics in
+// the APK Signing Block. A zero ID is valid and selects ChannelPairID.
+func ValidateBlockID(id uint32) error {
+	switch normalizeBlockID(id) {
+	case apksigblock.IDPaddingPair,
+		apksigblock.IDV2Signature,
+		apksigblock.IDV3Signature,
+		apksigblock.IDV31Signature,
+		apksigblock.IDSourceStampV1,
+		apksigblock.IDSourceStampV2,
+		apksigblock.IDDependencyInfo:
+		return fmt.Errorf("%w: 0x%08x", ErrReservedBlockID, id)
+	default:
+		return nil
+	}
+}
+
+func validatePairValue(id uint32, value []byte) error {
+	if len(value) == 0 {
+		return errors.New("vasdolly: empty V2/V3 channel pair")
+	}
+	if !utf8.Valid(value) {
+		return errors.New("vasdolly: V2/V3 channel is not valid UTF-8")
+	}
+	if id == WallePairID {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(value, &object); err != nil {
+			return fmt.Errorf("vasdolly: invalid Walle channel JSON: %w", err)
+		}
+		raw, ok := object["channel"]
+		var channel string
+		if !ok || json.Unmarshal(raw, &channel) != nil || channel == "" {
+			return errors.New("vasdolly: Walle channel JSON must contain a non-empty string channel")
+		}
+	}
+	return nil
+}
+
+func channelPair(block *apksigblock.Block, id uint32) (value []byte, found bool, err error) {
 	if block == nil {
 		return nil, false, nil
 	}
 	for _, pair := range block.Pairs {
-		if pair.ID != channelPairID {
+		if pair.ID != id {
 			continue
 		}
 		if found {
 			return nil, false, errors.New("vasdolly: duplicate V2/V3 channel pair")
 		}
-		if len(pair.Value) == 0 {
-			return nil, false, errors.New("vasdolly: empty V2/V3 channel pair")
-		}
-		if !utf8.Valid(pair.Value) {
-			return nil, false, errors.New("vasdolly: V2/V3 channel is not valid UTF-8")
+		if err := validatePairValue(id, pair.Value); err != nil {
+			return nil, false, err
 		}
 		value = append([]byte(nil), pair.Value...)
 		found = true
@@ -49,7 +94,10 @@ func channelPair(block *apksigblock.Block) (value []byte, found bool, err error)
 	return value, found, nil
 }
 
-func writeV2(a *archive, channel string) ([]byte, error) {
+func writeV2(a *archive, channel string, id uint32) ([]byte, error) {
+	if err := ValidateBlockID(id); err != nil {
+		return nil, err
+	}
 	channelBytes, err := validateChannel(channel)
 	if err != nil {
 		return nil, err
@@ -57,7 +105,14 @@ func writeV2(a *archive, channel string) ([]byte, error) {
 	if a.block == nil {
 		return nil, ErrNoSigningBlock
 	}
-	if _, found, err := channelPair(a.block); err != nil {
+	id = normalizeBlockID(id)
+	if id == WallePairID {
+		channelBytes, err = json.Marshal(map[string]string{"channel": channel})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, found, err := channelPair(a.block, id); err != nil {
 		return nil, err
 	} else if found {
 		return nil, ErrChannelExists
@@ -72,7 +127,7 @@ func writeV2(a *archive, channel string) ([]byte, error) {
 	for _, pair := range a.block.Pairs {
 		if pair.ID == apksigblock.IDPaddingPair {
 			if !inserted {
-				pairs = append(pairs, apksigblock.Pair{ID: channelPairID, Value: append([]byte(nil), channelBytes...)})
+				pairs = append(pairs, apksigblock.Pair{ID: id, Value: append([]byte(nil), channelBytes...)})
 				inserted = true
 			}
 			continue
@@ -80,19 +135,23 @@ func writeV2(a *archive, channel string) ([]byte, error) {
 		pairs = append(pairs, apksigblock.Pair{ID: pair.ID, Value: append([]byte(nil), pair.Value...)})
 	}
 	if !inserted {
-		pairs = append(pairs, apksigblock.Pair{ID: channelPairID, Value: append([]byte(nil), channelBytes...)})
+		pairs = append(pairs, apksigblock.Pair{ID: id, Value: append([]byte(nil), channelBytes...)})
 	}
 	return rewriteBlock(a, pairs)
 }
 
-func removeV2(a *archive) ([]byte, error) {
+func removeV2(a *archive, id uint32) ([]byte, error) {
+	if err := ValidateBlockID(id); err != nil {
+		return nil, err
+	}
 	if a.block == nil {
 		return nil, ErrNoSigningBlock
 	}
 	if _, _, err := parseV1Comment(v1Comment(a)); err != nil {
 		return nil, err
 	}
-	_, found, err := channelPair(a.block)
+	id = normalizeBlockID(id)
+	_, found, err := channelPair(a.block, id)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +160,7 @@ func removeV2(a *archive) ([]byte, error) {
 	}
 	pairs := make([]apksigblock.Pair, 0, len(a.block.Pairs))
 	for _, pair := range a.block.Pairs {
-		if pair.ID == channelPairID || pair.ID == apksigblock.IDPaddingPair {
+		if pair.ID == id || pair.ID == apksigblock.IDPaddingPair {
 			continue
 		}
 		pairs = append(pairs, apksigblock.Pair{ID: pair.ID, Value: append([]byte(nil), pair.Value...)})

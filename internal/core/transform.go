@@ -58,6 +58,9 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 	if w == nil {
 		return errors.New("vasdolly: nil Writer")
 	}
+	if err := ValidateBlockID(opts.BlockID); err != nil {
+		return err
+	}
 	a, err := loadArchive(r, size)
 	if err != nil {
 		return err
@@ -76,7 +79,7 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 	case ModeV1:
 		output, err = writeV1(a, channel)
 	case ModeV2:
-		output, err = writeV2(a, channel)
+		output, err = writeV2(a, channel, opts.BlockID)
 	default:
 		err = ErrInvalidMode
 	}
@@ -92,6 +95,9 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions) error {
 	if w == nil {
 		return errors.New("vasdolly: nil Writer")
+	}
+	if err := ValidateBlockID(opts.BlockID); err != nil {
+		return err
 	}
 	a, err := loadArchive(r, size)
 	if err != nil {
@@ -115,7 +121,7 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 		if mode == ModeV1 {
 			output, err = removeV1(a)
 		} else {
-			output, err = removeV2(a)
+			output, err = removeV2(a, opts.BlockID)
 		}
 		if err != nil {
 			return err
@@ -129,7 +135,7 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 	if v1Err != nil {
 		return v1Err
 	}
-	_, v2Found, pairErr := channelPair(a.block)
+	_, v2Found, pairErr := channelPair(a.block, normalizeBlockID(opts.BlockID))
 	if pairErr != nil {
 		return pairErr
 	}
@@ -138,7 +144,7 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 	}
 	output := a.data
 	if hasModern && v2Found {
-		output, err = removeV2(a)
+		output, err = removeV2(a, opts.BlockID)
 		if err != nil {
 			return err
 		}

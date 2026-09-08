@@ -27,7 +27,8 @@ const (
 
 type TransformOptions struct {
     Mode         Mode
-    VerifyInput  bool // true 时验证输入签名；Go 零值为 false
+    BlockID      uint32 // 0 默认使用 VasDolly (0x881155ff)；支持 Walle (0x71777777) 或自定义 32 位 ID
+    VerifyInput  bool   // true 时验证输入签名；Go 零值为 false
 }
 
 type BatchOptions struct {
@@ -54,8 +55,14 @@ type Artifact struct {
     Mode    Mode
 }
 
+const (
+    ChannelPairID uint32 = 0x881155ff
+    WallePairID   uint32 = 0x71777777
+)
+
 func Detect(r io.ReaderAt, size int64) (Detection, error)
 func ReadChannel(r io.ReaderAt, size int64) (string, error)
+func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, error)
 func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts TransformOptions) error
 func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions) error
 func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifact, error)
@@ -72,14 +79,15 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 - 读取时校验 magic、长度边界和 UTF-8。
 - 删除时只移除 VasDolly 渠道尾部；保留原有 comment 内容。
 
-### V2/V3 渠道格式
+### V2/V3 渠道格式与多 Block ID 支持
 
-- 使用 VasDolly 固定 pair ID：`0x881155ff`。
-- 渠道 value 为 UTF-8 原始字节，不附加额外编码。
+- 默认使用 VasDolly 固定 pair ID：`0x881155ff`；渠道 value 为 UTF-8 原始字节，不附加额外编码。
+- 兼容美团 Walle pair ID：`0x71777777`；写入时自动封装为 JSON `{"channel":"<name>"}`，读取与校验时要求非空 `channel` 字符串并允许额外元数据字段。
+- 支持调用方指定的自定义 32 位十六进制 pair ID，以原始 UTF-8 字符串存储渠道信息。
 - 使用 `apksig-go/pkg/zip` 和 `pkg/apksigblock` 定位 EOCD、Signing Block、中央目录和原始内容。
 - 重建 Signing Block 时：
   - 保留所有未知 ID-value pair 及其顺序；
-  - 检测已有 `0x881155ff` pair 并返回 `ErrChannelExists`，避免重复；
+  - 检测已有目标 channel pair 并返回 `ErrChannelExists`，避免重复；
   - 移除旧 padding pair 后重新计算 padding；
   - 保证 Signing Block 按 4096 字节边界对齐；
   - 更新 EOCD 中的中央目录偏移；
@@ -90,8 +98,8 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 
 - `Detect` 使用 `apksig-go/pkg/apkverifier` 验证可用签名，并按 V3/V3.1 → V2 → V1 选择最高模式。
 - `VerifyInput` 显式设为 `true` 时验证输入签名；Go bool 的零值保持为跳过签名验证，只执行结构检查。
-- `ReadChannel` 按 V2/V3 pair → V1 ZIP comment 顺序读取。
-- `RemoveChannel` 在 `auto` 模式下同时清理 V2/V3 pair 和 V1 尾部 marker，避免留下第二个渠道来源；显式模式只处理指定模式。
+- `ReadChannel` 默认按 VasDolly pair (`0x881155ff`) → Walle pair (`0x71777777`) → V1 ZIP comment 顺序读取；`ReadChannelWithBlockID` 支持指定任意 block ID。
+- `RemoveChannel` 在 `auto` 模式下清理目标 pair（默认 VasDolly pair）和 V1 尾部 marker，避免留下第二个渠道来源；显式模式只处理指定模式与 Block ID。
 - 基础 APK 已存在渠道信息时，`Pack` 返回 `ErrChannelExists`，不在已有渠道上继续叠加。
 
 ### 输入、文件名和批量行为
@@ -113,12 +121,15 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 vasdolly put -c "channel1,channel2" base.apk out-dir/
 vasdolly put -c channels.txt base.apk out-dir/
 vasdolly put --mode v1 -c channels.txt base.apk out-dir/
+vasdolly put --mode v2 --block-id Walle -c channels.txt base.apk out-dir/
 
 vasdolly get -c channel.apk
+vasdolly get -c channel.apk --block-id Walle
 vasdolly get -s channel.apk
 
 vasdolly remove -c channel.apk
 vasdolly remove --mode v2 channel.apk cleaned.apk
+vasdolly remove --block-id Walle channel.apk cleaned.apk
 ```
 
 约定：
@@ -128,6 +139,7 @@ vasdolly remove --mode v2 channel.apk cleaned.apk
 - `get -s` 输出签名模式和验证状态；
 - `remove -c` 默认原地生成安全临时文件后替换原文件；
 - `--mode auto|v1|v2` 覆盖自动检测；
+- `--block-id VasDolly|Walle|<hex>` 指定 Signing Block ID（默认 `VasDolly`）；
 - `--out`、`--pattern`、`--overwrite`、`--workers`、`--no-verify` 为 Go CLI 扩展参数；
 - 命令错误使用非零退出码，并输出可定位的结构、签名或渠道错误。
 

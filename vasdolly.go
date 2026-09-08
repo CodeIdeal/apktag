@@ -33,6 +33,9 @@ type Artifact = core.Artifact
 // Signing Block.
 const ChannelPairID = core.ChannelPairID
 
+// WallePairID is Walle's channel pair identifier. Its value is JSON encoded.
+const WallePairID = core.WallePairID
+
 // V1Marker terminates the VasDolly V1 ZIP comment suffix.
 const V1Marker = core.V1Marker
 
@@ -41,9 +44,16 @@ var (
 	ErrChannelNotFound = core.ErrChannelNotFound
 	ErrInvalidChannel  = core.ErrInvalidChannel
 	ErrInvalidMode     = core.ErrInvalidMode
+	ErrReservedBlockID = core.ErrReservedBlockID
 	ErrNoSigningBlock  = core.ErrNoSigningBlock
 	ErrUnverifiedInput = core.ErrUnverifiedInput
 )
+
+// ValidateBlockID rejects Android-reserved APK Signing Block IDs. Zero is
+// valid and selects ChannelPairID when used in TransformOptions.
+func ValidateBlockID(blockID uint32) error {
+	return core.ValidateBlockID(blockID)
+}
 
 // Pack adds channel metadata to an APK and writes the result to w. The input
 // ReaderAt is never modified. Set VerifyInput to verify the selected signing
@@ -67,6 +77,12 @@ func Detect(r io.ReaderAt, size int64) (Detection, error) {
 // ReadChannel reads VasDolly channel metadata from an APK.
 func ReadChannel(r io.ReaderAt, size int64) (string, error) {
 	return core.ReadChannel(r, size)
+}
+
+// ReadChannelWithBlockID reads channel metadata from a specific Signing Block pair.
+// A zero block ID preserves the default auto-detection behavior.
+func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, error) {
+	return core.ReadChannelWithBlockID(r, size, blockID)
 }
 
 // PackFiles creates one independent artifact per channel. The base APK is

@@ -12,6 +12,9 @@ const (
 // TransformOptions controls a single APK transformation.
 type TransformOptions struct {
 	Mode Mode
+	// BlockID selects the APK Signing Block pair used for channel metadata.
+	// Zero selects the default VasDolly ID. Android-reserved IDs are rejected.
+	BlockID uint32
 
 	// VerifyInput asks Pack and Remove to verify the selected signing scheme
 	// before transforming. Structural validation is always performed.

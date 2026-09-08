@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -143,6 +144,34 @@ func TestCLIHelp(t *testing.T) {
 	for _, args := range [][]string{{"help"}, {"put", "-h"}, {"get", "-h"}, {"remove", "-h"}} {
 		if _, err := captureRun(t, args...); err != nil {
 			t.Fatalf("%v help: %v", args, err)
+		}
+	}
+}
+
+func TestParseBlockID(t *testing.T) {
+	tests := map[string]uint32{"VasDolly": vasdolly.ChannelPairID, "walle": vasdolly.WallePairID, "0x881155FF": vasdolly.ChannelPairID}
+	for input, want := range tests {
+		got, err := parseBlockID(input)
+		if err != nil || got != want {
+			t.Errorf("parseBlockID(%q) = %#x, %v", input, got, err)
+		}
+	}
+	for _, input := range []string{"0", "71777777", "881155FF", "881155"} {
+		if _, err := parseBlockID(input); err == nil {
+			t.Errorf("unprefixed block ID %q accepted", input)
+		}
+	}
+	for _, input := range []string{
+		"0x42726577",
+		"0x7109871a",
+		"0xf05368c0",
+		"0x1b93ad61",
+		"0x2b09189e",
+		"0x6dff800d",
+		"0x504b4453",
+	} {
+		if _, err := parseBlockID(input); !errors.Is(err, vasdolly.ErrReservedBlockID) {
+			t.Errorf("parseBlockID(%q) error = %v, want ErrReservedBlockID", input, err)
 		}
 	}
 }

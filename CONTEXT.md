@@ -27,3 +27,12 @@ _避免_：签名模式（描述检测结果时可使用“模式”，领域概
 
 **Signing Block**：位于 APK 内容与 ZIP 中央目录之间、承载 V2/V3 签名及其他 ID-value 元数据的结构。
 _避免_：签名段、签名块（面向用户说明时可作为释义）
+
+**Signing Block ID / 渠道 ID**：APK Signing Block 中用于标识特定 ID-value pair 的 32 位无符号整数。
+_避免_：块编号、Tag ID
+
+**VasDolly 渠道 ID**：默认的 Signing Block 渠道 ID（`0x881155ff`），其 value 直接存储 UTF-8 编码的渠道字符串。
+
+**Walle 渠道 ID**：兼容美团 Walle 的 Signing Block 渠道 ID（`0x71777777`），其 value 存储包含 `channel` 字符串字段的 JSON 对象。
+
+**自定义渠道 ID**：由调用方指定的 32 位无符号十六进制 Signing Block ID，默认以原始 UTF-8 字符串存储渠道信息。

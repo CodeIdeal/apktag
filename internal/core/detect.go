@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -121,15 +122,56 @@ func Detect(r io.ReaderAt, size int64) (Detection, error) {
 }
 
 func ReadChannel(r io.ReaderAt, size int64) (string, error) {
+	return ReadChannelWithBlockID(r, size, 0)
+}
+
+func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, error) {
+	if blockID != 0 {
+		if err := ValidateBlockID(blockID); err != nil {
+			return "", err
+		}
+	}
 	a, err := loadArchive(r, size)
 	if err != nil {
 		return "", err
 	}
 	if a.block != nil {
-		if value, found, err := channelPair(a.block); err != nil {
+		if blockID != 0 {
+			id := normalizeBlockID(blockID)
+			value, found, err := channelPair(a.block, id)
+			if err != nil {
+				return "", err
+			}
+			if found && id == WallePairID {
+				var object struct {
+					Channel string `json:"channel"`
+				}
+				if err := json.Unmarshal(value, &object); err != nil {
+					return "", err
+				}
+				return object.Channel, nil
+			}
+			if found {
+				return string(value), nil
+			}
+			// A V1 channel remains the fallback when the requested pair is absent.
+			return readV1(a)
+		}
+		if value, found, err := channelPair(a.block, ChannelPairID); err != nil {
 			return "", err
 		} else if found {
 			return string(value), nil
+		}
+		if value, found, err := channelPair(a.block, WallePairID); err != nil {
+			return "", err
+		} else if found {
+			var object struct {
+				Channel string `json:"channel"`
+			}
+			if err := json.Unmarshal(value, &object); err != nil {
+				return "", err
+			}
+			return object.Channel, nil
 		}
 	}
 	return readV1(a)

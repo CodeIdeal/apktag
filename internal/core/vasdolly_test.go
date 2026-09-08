@@ -9,6 +9,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"os"
@@ -28,6 +31,86 @@ import (
 	"github.com/agusibrahim/apksig-go/pkg/v1signer"
 	zippkg "github.com/agusibrahim/apksig-go/pkg/zip"
 )
+
+func TestWalleBlockIDUsesJSONPayload(t *testing.T) {
+	input := makeModernSignedAPK(t, false, false)
+	var packed bytes.Buffer
+	if err := Pack(bytes.NewReader(input), int64(len(input)), "play", &packed, TransformOptions{Mode: ModeV2, BlockID: WallePairID}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadChannelWithBlockID(bytes.NewReader(packed.Bytes()), int64(packed.Len()), WallePairID)
+	if err != nil || got != "play" {
+		t.Fatalf("ReadChannelWithBlockID = %q, %v", got, err)
+	}
+	a, err := loadArchive(bytes.NewReader(packed.Bytes()), int64(packed.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, found, err := channelPair(a.block, WallePairID)
+	if err != nil || !found {
+		t.Fatalf("Walle pair missing: %v", err)
+	}
+	var object map[string]string
+	if err := json.Unmarshal(value, &object); err != nil || object["channel"] != "play" {
+		t.Fatalf("Walle payload = %s, %v", value, err)
+	}
+}
+
+func TestWalleBlockIDRejectsInvalidJSON(t *testing.T) {
+	if err := validatePairValue(WallePairID, []byte(`{"extra":"x"}`)); err == nil {
+		t.Fatal("invalid Walle JSON accepted")
+	}
+}
+
+func TestReservedBlockIDsAreRejectedForPackAndRemove(t *testing.T) {
+	reserved := []uint32{
+		apksigblock.IDPaddingPair,
+		apksigblock.IDV2Signature,
+		apksigblock.IDV3Signature,
+		apksigblock.IDV31Signature,
+		apksigblock.IDSourceStampV1,
+		apksigblock.IDSourceStampV2,
+		apksigblock.IDDependencyInfo,
+	}
+	input := makeModernSignedAPK(t, false, false)
+	for _, id := range reserved {
+		t.Run(fmt.Sprintf("0x%08x", id), func(t *testing.T) {
+			var packed bytes.Buffer
+			err := Pack(bytes.NewReader(input), int64(len(input)), "channel", &packed, TransformOptions{Mode: ModeV2, BlockID: id})
+			if !errors.Is(err, ErrReservedBlockID) {
+				t.Fatalf("Pack error = %v, want ErrReservedBlockID", err)
+			}
+			if packed.Len() != 0 {
+				t.Fatalf("Pack wrote %d bytes after rejecting reserved ID", packed.Len())
+			}
+
+			var removed bytes.Buffer
+			err = RemoveChannel(bytes.NewReader(input), int64(len(input)), &removed, TransformOptions{Mode: ModeV2, BlockID: id})
+			if !errors.Is(err, ErrReservedBlockID) {
+				t.Fatalf("RemoveChannel error = %v, want ErrReservedBlockID", err)
+			}
+			if removed.Len() != 0 {
+				t.Fatalf("RemoveChannel wrote %d bytes after rejecting reserved ID", removed.Len())
+			}
+			if _, err := ReadChannelWithBlockID(bytes.NewReader(input), int64(len(input)), id); !errors.Is(err, ErrReservedBlockID) {
+				t.Fatalf("ReadChannelWithBlockID error = %v, want ErrReservedBlockID", err)
+			}
+		})
+	}
+}
+
+func TestReadChannelWithBlockIDFallsBackToV1(t *testing.T) {
+	input := makeZIP(t, "")
+	var packed bytes.Buffer
+	if err := Pack(bytes.NewReader(input), int64(len(input)), "legacy", &packed, TransformOptions{Mode: ModeV1}); err != nil {
+		t.Fatal(err)
+	}
+	withSigningBlock := addSigningBlock(t, packed.Bytes(), []apksigblock.Pair{{ID: apksigblock.IDV2Signature, Value: []byte("signature")}})
+	got, err := ReadChannelWithBlockID(bytes.NewReader(withSigningBlock), int64(len(withSigningBlock)), WallePairID)
+	if err != nil || got != "legacy" {
+		t.Fatalf("ReadChannelWithBlockID fallback = %q, %v", got, err)
+	}
+}
 
 const testManifestBase64 = "AwAIAGgEAAABABwAqAIAABQAAAAAAAAAAAAAAGwAAAAAAAAAAAAAABoAAAA0AAAAWgAAAJAAAACuAAAAvAAAAM4AAAAmAQAAKgEAADwBAABwAQAApAEAALgBAADkAQAA6gEAAPIBAAD6AQAADgIAACgCAAALAHYAZQByAHMAaQBvAG4AQwBvAGQAZQAAAAsAdgBlAHIAcwBpAG8AbgBOAGEAbQBlAAAAEQBjAG8AbQBwAGkAbABlAFMAZABrAFYAZQByAHMAaQBvAG4AAAAZAGMAbwBtAHAAaQBsAGUAUwBkAGsAVgBlAHIAcwBpAG8AbgBDAG8AZABlAG4AYQBtAGUAAAANAG0AaQBuAFMAZABrAFYAZQByAHMAaQBvAG4AAAAFAGwAYQBiAGUAbAAAAAcAYQBuAGQAcgBvAGkAZAAAACoAaAB0AHQAcAA6AC8ALwBzAGMAaABlAG0AYQBzAC4AYQBuAGQAcgBvAGkAZAAuAGMAbwBtAC8AYQBwAGsALwByAGUAcwAvAGEAbgBkAHIAbwBpAGQAAAAAAAAABwBwAGEAYwBrAGEAZwBlAAAAGABwAGwAYQB0AGYAbwByAG0AQgB1AGkAbABkAFYAZQByAHMAaQBvAG4AQwBvAGQAZQAAABgAcABsAGEAdABmAG8AcgBtAEIAdQBpAGwAZABWAGUAcgBzAGkAbwBuAE4AYQBtAGUAAAAIAG0AYQBuAGkAZgBlAHMAdAAAABQAYwBvAG0ALgBlAHgAYQBtAHAAbABlAC4AdgBhAHMAZABvAGwAbAB5AAAAAQAxAAAAAgAxADcAAAACADMANwAAAAgAdQBzAGUAcwAtAHMAZABrAAAACwBhAHAAcABsAGkAYwBhAHQAaQBvAG4AAAAIAFYAYQBzAEQAbwBsAGwAeQAAAIABCAAgAAAAGwIBARwCAQFyBQEBcwUBAQwCAQEBAAEBAAEQABgAAAABAAAA/////wYAAAAHAAAAAgEQALAAAAABAAAA//////////8MAAAAFAAUAAcAAAAAAAAABwAAAAAAAAD/////CAAAEAEAAAAHAAAAAQAAAA4AAAAIAAADDgAAAAcAAAACAAAA/////wgAABAlAAAABwAAAAMAAAAPAAAACAAAAw8AAAD/////CQAAAA0AAAAIAAADDQAAAP////8KAAAAEAAAAAgAABAlAAAA/////wsAAAAPAAAACAAAEBEAAAACARAAOAAAAAEAAAD//////////xEAAAAUABQAAQAAAAAAAAAHAAAABAAAAP////8IAAAQGAAAAAMBEAAYAAAAAQAAAP//////////EQAAAAIBEAA4AAAAAQAAAP//////////EgAAABQAFAABAAAAAAAAAAcAAAAFAAAAEwAAAAgAAAMTAAAAAwEQABgAAAABAAAA//////////8SAAAAAwEQABgAAAABAAAA//////////8MAAAAAQEQABgAAAABAAAA/////wYAAAAHAAAA"
 

@@ -15,6 +15,9 @@ import (
 // PackFiles creates one independent artifact per channel. The base APK is
 // loaded once and is never modified. Results retain the input channel order.
 func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifact, error) {
+	if err := ValidateBlockID(opts.BlockID); err != nil {
+		return nil, err
+	}
 	if basePath == "" {
 		return nil, errors.New("vasdolly: base APK path is empty")
 	}

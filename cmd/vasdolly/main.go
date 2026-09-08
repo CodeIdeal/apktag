@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	vasdolly "github.com/CodeIdeal/VasDolly-go"
@@ -50,6 +51,7 @@ func runPut(args []string) error {
 	overwrite := flags.Bool("overwrite", false, "replace existing outputs")
 	workers := flags.Int("workers", 0, "number of concurrent workers")
 	noVerify := flags.Bool("no-verify", false, "skip signature verification")
+	blockIDValue := flags.String("block-id", "VasDolly", "Signing Block ID: VasDolly, Walle, or a 32-bit hexadecimal value")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -70,9 +72,13 @@ func runPut(args []string) error {
 	if err != nil {
 		return err
 	}
+	blockID, err := parseBlockID(*blockIDValue)
+	if err != nil {
+		return err
+	}
 	base := positional[0]
 	options := vasdolly.BatchOptions{
-		TransformOptions: vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), VerifyInput: !*noVerify},
+		TransformOptions: vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify},
 		OutputDir:        "",
 		OutputPattern:    *pattern,
 		Overwrite:        *overwrite,
@@ -109,6 +115,7 @@ func runGet(args []string) error {
 	flags.SetOutput(os.Stderr)
 	apkPath := flags.String("c", "", "APK path")
 	showStatus := flags.Bool("s", false, "show signing mode and verification status")
+	blockIDValue := flags.String("block-id", "VasDolly", "Signing Block ID: VasDolly, Walle, or a 32-bit hexadecimal value")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -146,7 +153,11 @@ func runGet(args []string) error {
 		fmt.Printf("mode=%s verified=%t v1=%t v2=%t v3=%t v31=%t\n", detection.Mode, detection.Verified, detection.HasV1, detection.HasV2, detection.HasV3, detection.HasV31)
 		return nil
 	}
-	channel, err := vasdolly.ReadChannel(file, info.Size())
+	blockID, err := parseBlockID(*blockIDValue)
+	if err != nil {
+		return err
+	}
+	channel, err := vasdolly.ReadChannelWithBlockID(file, info.Size(), blockID)
 	if err != nil {
 		return err
 	}
@@ -160,6 +171,7 @@ func runRemove(args []string) error {
 	input := flags.String("c", "", "APK path")
 	mode := flags.String("mode", "auto", "auto, v1, or v2")
 	noVerify := flags.Bool("no-verify", false, "skip signature verification")
+	blockIDValue := flags.String("block-id", "VasDolly", "Signing Block ID: VasDolly, Walle, or a 32-bit hexadecimal value")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -189,7 +201,11 @@ func runRemove(args []string) error {
 		return err
 	}
 	var output bytes.Buffer
-	if err := vasdolly.RemoveChannel(bytes.NewReader(data), int64(len(data)), &output, vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), VerifyInput: !*noVerify}); err != nil {
+	blockID, err := parseBlockID(*blockIDValue)
+	if err != nil {
+		return err
+	}
+	if err := vasdolly.RemoveChannel(bytes.NewReader(data), int64(len(data)), &output, vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify}); err != nil {
 		return err
 	}
 	destination := ""
@@ -200,6 +216,28 @@ func runRemove(args []string) error {
 		return atomicWrite(destination, output.Bytes())
 	}
 	return atomicWrite(path, output.Bytes())
+}
+
+func parseBlockID(value string) (uint32, error) {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "vasdolly":
+		return vasdolly.ChannelPairID, nil
+	case "walle":
+		return vasdolly.WallePairID, nil
+	}
+	if len(value) < 3 || !(strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X")) {
+		return 0, fmt.Errorf("invalid block ID %q: use VasDolly, Walle, or a 0x-prefixed 32-bit hexadecimal value", value)
+	}
+	parsed, err := strconv.ParseUint(value[2:], 16, 32)
+	if err != nil || parsed == 0 {
+		return 0, fmt.Errorf("invalid block ID %q: use VasDolly, Walle, or a non-zero 0x-prefixed 32-bit hexadecimal value", value)
+	}
+	blockID := uint32(parsed)
+	if err := vasdolly.ValidateBlockID(blockID); err != nil {
+		return 0, fmt.Errorf("invalid block ID %q: %w", value, err)
+	}
+	return blockID, nil
 }
 
 func channelsFromSpec(spec string) ([]string, error) {
