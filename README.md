@@ -2,7 +2,7 @@
 
 English | [简体中文](README_zh-CN.md)
 
-A pure-Go library and command-line tool for reading and writing channel metadata in Android APK files, compatible with VasDolly and Walle, and custom block id too. It read/write only the channel metadata and does not re-sign the APK. The base APK remains untouched, and each channel is written to an independent output file.
+A pure-Go library and command-line tool for reading and writing channel metadata in Android APK files, compatible with VasDolly, Walle, and custom Signing Block IDs. It reads and writes only the channel metadata and does not re-sign the APK. The base APK remains untouched, and each channel is written to an independent output file.
 
 Features:
 
@@ -79,3 +79,15 @@ The repository follows a focused version of the common Go project layout:
 The root package uses the `github.com/CodeIdeal/apktag` import path. Implementation that external projects must not import directly lives in `internal/core`. There is no separate second public package, so the repository does not need a `pkg/` directory.
 
 The runtime depends on `github.com/agusibrahim/apksig-go v1.1.0`. It does not invoke Java, Android SDK tools, `apksigner`, or CGO.
+
+## External interoperability tests
+
+The opt-in black-box suite runs the published VasDolly and Walle JARs against the same generated APK fixtures. It covers cross-reading, removal, signature combinations, channel and ZIP comment boundaries, Signing Block boundaries, batch input forms, metadata coexistence, malformed APKs, and MD5/structure comparisons.
+
+```sh
+VASDOLLY_JAR=/path/to/VasDolly.jar \
+WALLE_JAR=/path/to/walle.jar \
+go test -tags=interop ./internal/core -run TestInterop -count=1 -v -timeout=20m
+```
+
+Set `APKSIGNER` to an `apksigner` executable for an additional independent signature check. Set `INTEROP_ARTIFACT_DIR` to retain files and command logs from failed cases. The reference JARs are test-only dependencies and are never downloaded or committed.

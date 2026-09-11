@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-纯 Go 实现的 APK 多渠道信息读写库和命令行工具，兼容 VasDolly 和 Walle以及自定义的block id。它只读取/修改渠道信息，不重新签名 APK；基础 APK 保持不变，每个渠道输出独立文件。
+纯 Go 实现的 APK 多渠道信息读写库和命令行工具，兼容 VasDolly、Walle 以及自定义 Block ID。它只读取和修改渠道信息，不重新签名 APK；基础 APK 保持不变，每个渠道输出独立文件。
 
 支持：
 
@@ -77,3 +77,15 @@ go vet ./...
 根包使用 `github.com/CodeIdeal/apktag` import path；不可供外部项目直接依赖的实现放在 `internal/core`。项目没有独立的第二套公共包，因此不创建 `pkg/`。
 
 运行时依赖 `github.com/agusibrahim/apksig-go v1.1.0`，不调用 Java、Android SDK、`apksigner` 或 CGO。
+
+## 外部工具兼容性测试
+
+可选的黑盒测试会使用 VasDolly 和 Walle JAR，对同一组生成的 APK 做交叉读写、删除、签名组合、渠道和 ZIP comment 边界、Signing Block 边界、批量输入、元数据共存、损坏 APK 以及 MD5/结构对比验证。
+
+```sh
+VASDOLLY_JAR=/path/to/VasDolly.jar \
+WALLE_JAR=/path/to/walle.jar \
+go test -tags=interop ./internal/core -run TestInterop -count=1 -v -timeout=20m
+```
+
+设置 `APKSIGNER` 可额外执行独立签名校验；设置 `INTEROP_ARTIFACT_DIR` 可保留失败用例的文件和命令日志。参考 JAR 仅用于测试，不会下载或提交到仓库。
