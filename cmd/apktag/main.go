@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
-	vasdolly "github.com/CodeIdeal/VasDolly-go"
+	apktag "github.com/CodeIdeal/apktag"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "vasdolly:", err)
+		fmt.Fprintln(os.Stderr, "apktag:", err)
 		os.Exit(1)
 	}
 }
@@ -77,8 +77,8 @@ func runPut(args []string) error {
 		return err
 	}
 	base := positional[0]
-	options := vasdolly.BatchOptions{
-		TransformOptions: vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify},
+	options := apktag.BatchOptions{
+		TransformOptions: apktag.TransformOptions{Mode: apktag.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify},
 		OutputDir:        "",
 		OutputPattern:    *pattern,
 		Overwrite:        *overwrite,
@@ -100,7 +100,7 @@ func runPut(args []string) error {
 			options.OutputDir = output
 		}
 	}
-	artifacts, err := vasdolly.PackFiles(base, channels, options)
+	artifacts, err := apktag.PackFiles(base, channels, options)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func runGet(args []string) error {
 		return err
 	}
 	if *showStatus {
-		detection, err := vasdolly.Detect(file, info.Size())
+		detection, err := apktag.Detect(file, info.Size())
 		if err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func runGet(args []string) error {
 	if err != nil {
 		return err
 	}
-	channel, err := vasdolly.ReadChannelWithBlockID(file, info.Size(), blockID)
+	channel, err := apktag.ReadChannelWithBlockID(file, info.Size(), blockID)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func runRemove(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := vasdolly.RemoveChannel(bytes.NewReader(data), int64(len(data)), &output, vasdolly.TransformOptions{Mode: vasdolly.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify}); err != nil {
+	if err := apktag.RemoveChannel(bytes.NewReader(data), int64(len(data)), &output, apktag.TransformOptions{Mode: apktag.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify}); err != nil {
 		return err
 	}
 	destination := ""
@@ -222,9 +222,9 @@ func parseBlockID(value string) (uint32, error) {
 	value = strings.TrimSpace(value)
 	switch strings.ToLower(value) {
 	case "vasdolly":
-		return vasdolly.ChannelPairID, nil
+		return apktag.ChannelPairID, nil
 	case "walle":
-		return vasdolly.WallePairID, nil
+		return apktag.WallePairID, nil
 	}
 	if len(value) < 3 || !(strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X")) {
 		return 0, fmt.Errorf("invalid block ID %q: use VasDolly, Walle, or a 0x-prefixed 32-bit hexadecimal value", value)
@@ -234,7 +234,7 @@ func parseBlockID(value string) (uint32, error) {
 		return 0, fmt.Errorf("invalid block ID %q: use VasDolly, Walle, or a non-zero 0x-prefixed 32-bit hexadecimal value", value)
 	}
 	blockID := uint32(parsed)
-	if err := vasdolly.ValidateBlockID(blockID); err != nil {
+	if err := apktag.ValidateBlockID(blockID); err != nil {
 		return 0, fmt.Errorf("invalid block ID %q: %w", value, err)
 	}
 	return blockID, nil
@@ -261,7 +261,7 @@ func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".vasdolly-cli-*")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".apktag-cli-*")
 	if err != nil {
 		return err
 	}
@@ -293,9 +293,9 @@ func atomicWrite(path string, data []byte) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vasdolly <put|get|remove> [options]")
-	fmt.Fprintln(os.Stderr, "  vasdolly put -c channel1,channel2 base.apk out-dir/")
-	fmt.Fprintln(os.Stderr, "  vasdolly get -c channel.apk")
-	fmt.Fprintln(os.Stderr, "  vasdolly get -s channel.apk")
-	fmt.Fprintln(os.Stderr, "  vasdolly remove -c channel.apk [cleaned.apk]")
+	fmt.Fprintln(os.Stderr, "usage: apktag <put|get|remove> [options]")
+	fmt.Fprintln(os.Stderr, "  apktag put -c channel1,channel2 base.apk out-dir/")
+	fmt.Fprintln(os.Stderr, "  apktag get -c channel.apk")
+	fmt.Fprintln(os.Stderr, "  apktag get -s channel.apk")
+	fmt.Fprintln(os.Stderr, "  apktag remove -c channel.apk [cleaned.apk]")
 }

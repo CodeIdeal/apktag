@@ -56,7 +56,7 @@ func hasPairID(a *archive, id uint32) bool {
 // scheme before writing; structural checks always run.
 func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts TransformOptions) error {
 	if w == nil {
-		return errors.New("vasdolly: nil Writer")
+		return errors.New("apktag: nil Writer")
 	}
 	if err := ValidateBlockID(opts.BlockID); err != nil {
 		return err
@@ -94,7 +94,7 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 // their selected representation.
 func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions) error {
 	if w == nil {
-		return errors.New("vasdolly: nil Writer")
+		return errors.New("apktag: nil Writer")
 	}
 	if err := ValidateBlockID(opts.BlockID); err != nil {
 		return err

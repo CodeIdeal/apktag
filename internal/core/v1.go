@@ -46,16 +46,16 @@ func parseV1Comment(comment []byte) (channel string, found bool, err error) {
 		return "", false, nil
 	}
 	if len(comment) < len(v1Marker)+2 {
-		return "", false, errors.New("vasdolly: truncated V1 channel suffix")
+		return "", false, errors.New("apktag: truncated V1 channel suffix")
 	}
 	lengthPos := len(comment) - len(v1Marker) - 2
 	channelLen := int(binary.LittleEndian.Uint16(comment[lengthPos : lengthPos+2]))
 	if channelLen <= 0 || channelLen > lengthPos {
-		return "", false, errors.New("vasdolly: invalid V1 channel length")
+		return "", false, errors.New("apktag: invalid V1 channel length")
 	}
 	channelBytes := comment[lengthPos-channelLen : lengthPos]
 	if !utf8.Valid(channelBytes) {
-		return "", false, errors.New("vasdolly: V1 channel is not valid UTF-8")
+		return "", false, errors.New("apktag: V1 channel is not valid UTF-8")
 	}
 	return string(channelBytes), true, nil
 }
@@ -73,7 +73,7 @@ func writeV1(a *archive, channel string) ([]byte, error) {
 	}
 	newCommentLen := len(comment) + len(channelBytes) + 2 + len(v1Marker)
 	if newCommentLen > zipMaxComment {
-		return nil, errors.New("vasdolly: ZIP comment exceeds 65535 bytes")
+		return nil, errors.New("apktag: ZIP comment exceeds 65535 bytes")
 	}
 	newComment := make([]byte, 0, newCommentLen)
 	newComment = append(newComment, comment...)

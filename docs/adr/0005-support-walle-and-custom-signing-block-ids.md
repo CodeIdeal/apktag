@@ -10,10 +10,10 @@ Extend [ADR-0002](0002-preserve-signatures-when-injecting-channel-metadata.md) t
 
 - Restrict packaging exclusively to VasDolly's `0x881155ff` ID and require external tools or migration steps for Walle packages.
 - Provide a separate CLI tool or package for Walle channel operations.
-- Integrate Walle payload validation/formatting and configurable `BlockID` directly into `TransformOptions`, `ReadChannelWithBlockID`, and `vasdolly put|get|remove`.
+- Integrate Walle payload validation/formatting and configurable `BlockID` directly into `TransformOptions`, `ReadChannelWithBlockID`, and `apktag put|get|remove`.
 
 ## Consequences
 
 - VasDolly remains the default behavior (`BlockID == 0` defaults to `0x881155ff`).
-- Projects using Walle or proprietary Signing Block IDs can use VasDolly-go directly for channel packaging, inspection, and removal without breaking existing signatures.
+- Projects using Walle or proprietary Signing Block IDs can use apktag directly for channel packaging, inspection, and removal without breaking existing signatures.
 - Writing or reading Walle metadata validates JSON formatting and ensures non-empty channel values.

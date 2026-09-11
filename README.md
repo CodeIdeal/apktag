@@ -1,47 +1,56 @@
-# VasDolly-go
+# apktag
 
 English | [简体中文](README_zh-CN.md)
 
-A pure-Go library and command-line tool for reading and writing VasDolly channel metadata in Android APK files. It changes only the channel metadata and does not re-sign the APK. The base APK remains untouched, and each channel is written to an independent output file.
+A pure-Go library and command-line tool for reading and writing channel metadata in Android APK files, compatible with VasDolly and Walle, and custom block id too. It read/write only the channel metadata and does not re-sign the APK. The base APK remains untouched, and each channel is written to an independent output file.
 
 Features:
 
 - V1: appends `channel UTF-8 bytes + uint16LE(length) + ltlovezh` to the ZIP EOCD comment.
 - V2/V3: writes the VasDolly pair `0x881155ff` (or Walle / custom Signing Block ID) into the APK Signing Block while preserving all other pairs and existing signature payloads.
 - Library functions: `Pack`, `ReadChannel`, `ReadChannelWithBlockID`, `RemoveChannel`, and concurrent, atomic batch output through `PackFiles`.
-- CLI commands: `vasdolly put|get|remove`.
+- CLI commands: `apktag put|get|remove`.
 
 ## Library
+
+Import `github.com/CodeIdeal/apktag` and use the `apktag` package.
 
 ```go
 var output bytes.Buffer
 // Default VasDolly ID (0x881155ff)
-err := vasdolly.Pack(input, inputSize, "huawei", &output,
-    vasdolly.TransformOptions{Mode: vasdolly.ModeAuto})
+err := apktag.Pack(input, inputSize, "huawei", &output,
+    apktag.TransformOptions{Mode: apktag.ModeAuto})
 
 // Write Walle-compatible JSON payload or a custom Signing Block ID
-err = vasdolly.Pack(input, inputSize, "huawei", &output,
-    vasdolly.TransformOptions{Mode: vasdolly.ModeV2, BlockID: vasdolly.WallePairID})
+err = apktag.Pack(input, inputSize, "huawei", &output,
+    apktag.TransformOptions{Mode: apktag.ModeV2, BlockID: apktag.WallePairID})
 
 // Read channel with a specific Signing Block ID (0 auto-detects VasDolly -> Walle -> V1)
-channel, err := vasdolly.ReadChannelWithBlockID(input, inputSize, vasdolly.WallePairID)
+channel, err := apktag.ReadChannelWithBlockID(input, inputSize, apktag.WallePairID)
 ```
 
 `ModeAuto` prefers a V3/V2 APK Signing Block and falls back to V1. Set `VerifyInput: true` to verify the selected signing scheme before writing; structural validation is always performed. V1 mode rejects APKs that also contain V2/V3 signatures to avoid invalidating the stronger signature.
 
 ## CLI
 
+Build the CLI from this checkout:
+
+```sh
+go build -o apktag ./cmd/apktag
+./apktag --help
+```
+
 ```text
-vasdolly put -c "huawei,xiaomi" app.apk dist/
-vasdolly put -c channels.txt --mode v1 app.apk dist/
+apktag put -c "huawei,xiaomi" app.apk dist/
+apktag put -c channels.txt --mode v1 app.apk dist/
 
 # Use Walle-compatible JSON channel metadata
-vasdolly put -c channels.txt --mode v2 --block-id Walle app.apk dist/
-vasdolly get -c huawei-app.apk
-vasdolly get -c huawei-app.apk --block-id Walle
-vasdolly get -s huawei-app.apk
-vasdolly remove -c huawei-app.apk cleaned.apk
-vasdolly remove -c huawei-app.apk --block-id Walle cleaned.apk
+apktag put -c channels.txt --mode v2 --block-id Walle app.apk dist/
+apktag get -c huawei-app.apk
+apktag get -c huawei-app.apk --block-id Walle
+apktag get -s huawei-app.apk
+apktag remove -c huawei-app.apk cleaned.apk
+apktag remove -c huawei-app.apk --block-id Walle cleaned.apk
 ```
 
 `channels.txt` contains one channel per line. Empty lines and surrounding whitespace are ignored, and duplicate channels keep only their first occurrence.
@@ -61,12 +70,12 @@ The repository follows a focused version of the common Go project layout:
 
 ```text
 .
-|-- cmd/vasdolly/   # Command-line entry point
+|-- cmd/apktag/     # Command-line entry point
 |-- internal/core/  # APK parsing, signature detection, and channel transforms
 |-- docs/           # Design, research, and maintenance documentation
-`-- vasdolly.go     # Stable public Go interface
+`-- apktag.go       # Stable public Go interface
 ```
 
-The root package preserves the `github.com/CodeIdeal/VasDolly-go` import path. Implementation that external projects must not import directly lives in `internal/core`. There is no separate second public package, so the repository does not need a `pkg/` directory.
+The root package uses the `github.com/CodeIdeal/apktag` import path. Implementation that external projects must not import directly lives in `internal/core`. There is no separate second public package, so the repository does not need a `pkg/` directory.
 
 The runtime depends on `github.com/agusibrahim/apksig-go v1.1.0`. It does not invoke Java, Android SDK tools, `apksigner`, or CGO.

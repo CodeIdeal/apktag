@@ -55,20 +55,20 @@ func ValidateBlockID(id uint32) error {
 
 func validatePairValue(id uint32, value []byte) error {
 	if len(value) == 0 {
-		return errors.New("vasdolly: empty V2/V3 channel pair")
+		return errors.New("apktag: empty V2/V3 channel pair")
 	}
 	if !utf8.Valid(value) {
-		return errors.New("vasdolly: V2/V3 channel is not valid UTF-8")
+		return errors.New("apktag: V2/V3 channel is not valid UTF-8")
 	}
 	if id == WallePairID {
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(value, &object); err != nil {
-			return fmt.Errorf("vasdolly: invalid Walle channel JSON: %w", err)
+			return fmt.Errorf("apktag: invalid Walle channel JSON: %w", err)
 		}
 		raw, ok := object["channel"]
 		var channel string
 		if !ok || json.Unmarshal(raw, &channel) != nil || channel == "" {
-			return errors.New("vasdolly: Walle channel JSON must contain a non-empty string channel")
+			return errors.New("apktag: Walle channel JSON must contain a non-empty string channel")
 		}
 	}
 	return nil
@@ -83,7 +83,7 @@ func channelPair(block *apksigblock.Block, id uint32) (value []byte, found bool,
 			continue
 		}
 		if found {
-			return nil, false, errors.New("vasdolly: duplicate V2/V3 channel pair")
+			return nil, false, errors.New("apktag: duplicate V2/V3 channel pair")
 		}
 		if err := validatePairValue(id, pair.Value); err != nil {
 			return nil, false, err
@@ -172,10 +172,10 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 	var bodyLen uint64
 	for _, pair := range pairs {
 		if bodyLen > ^uint64(0)-12 {
-			return nil, errors.New("vasdolly: signing block is too large")
+			return nil, errors.New("apktag: signing block is too large")
 		}
 		if uint64(len(pair.Value)) > ^uint64(0)-12-bodyLen {
-			return nil, errors.New("vasdolly: signing block is too large")
+			return nil, errors.New("apktag: signing block is too large")
 		}
 		bodyLen += 12 + uint64(len(pair.Value))
 	}
@@ -185,7 +185,7 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 	padding := (4096 - base%4096) % 4096
 	total := base + padding
 	if total > uint64(maxInt()) || total > ^uint64(0)-8 {
-		return nil, errors.New("vasdolly: signing block is too large")
+		return nil, errors.New("apktag: signing block is too large")
 	}
 	body := make([]byte, 0, int(bodyLen+paddingPairLen+padding))
 	for _, pair := range pairs {
@@ -212,7 +212,7 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 	out = append(out, length[:]...)
 	out = append(out, []byte(zipSigMagic)...)
 	if len(out)%4096 != 0 {
-		return nil, errors.New("vasdolly: internal signing block alignment error")
+		return nil, errors.New("apktag: internal signing block alignment error")
 	}
 	return out, nil
 }
@@ -224,7 +224,7 @@ func rewriteBlock(a *archive, pairs []apksigblock.Pair) ([]byte, error) {
 	}
 	newCDOffset := a.block.StartOffset + int64(len(blockBytes))
 	if newCDOffset < 0 || uint64(newCDOffset) > uint64(^uint32(0)) {
-		return nil, errors.New("vasdolly: central directory offset exceeds ZIP limits")
+		return nil, errors.New("apktag: central directory offset exceeds ZIP limits")
 	}
 	cdStart := int(a.eocd.CDStartOffset)
 	cdEnd := cdStart + int(a.eocd.CDSize)

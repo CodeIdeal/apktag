@@ -1,4 +1,4 @@
-package vasdolly_test
+package apktag_test
 
 import (
 	"archive/zip"
@@ -6,29 +6,29 @@ import (
 	"errors"
 	"testing"
 
-	vasdolly "github.com/CodeIdeal/VasDolly-go"
+	apktag "github.com/CodeIdeal/apktag"
 )
 
 func TestPublicFacadeV1RoundTrip(t *testing.T) {
 	input := makeTestAPK(t)
 
 	var packed bytes.Buffer
-	if err := vasdolly.Pack(bytes.NewReader(input), int64(len(input)), "huawei", &packed, vasdolly.TransformOptions{Mode: vasdolly.ModeV1}); err != nil {
+	if err := apktag.Pack(bytes.NewReader(input), int64(len(input)), "huawei", &packed, apktag.TransformOptions{Mode: apktag.ModeV1}); err != nil {
 		t.Fatal(err)
 	}
-	channel, err := vasdolly.ReadChannel(bytes.NewReader(packed.Bytes()), int64(packed.Len()))
+	channel, err := apktag.ReadChannel(bytes.NewReader(packed.Bytes()), int64(packed.Len()))
 	if err != nil || channel != "huawei" {
 		t.Fatalf("ReadChannel = %q, %v", channel, err)
 	}
 
 	var restored bytes.Buffer
-	if err := vasdolly.RemoveChannel(bytes.NewReader(packed.Bytes()), int64(packed.Len()), &restored, vasdolly.TransformOptions{Mode: vasdolly.ModeV1}); err != nil {
+	if err := apktag.RemoveChannel(bytes.NewReader(packed.Bytes()), int64(packed.Len()), &restored, apktag.TransformOptions{Mode: apktag.ModeV1}); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(restored.Bytes(), input) {
 		t.Fatal("RemoveChannel did not restore the input APK")
 	}
-	if _, err := vasdolly.ReadChannel(bytes.NewReader(input), int64(len(input))); !errors.Is(err, vasdolly.ErrChannelNotFound) {
+	if _, err := apktag.ReadChannel(bytes.NewReader(input), int64(len(input))); !errors.Is(err, apktag.ErrChannelNotFound) {
 		t.Fatalf("ReadChannel error = %v, want ErrChannelNotFound", err)
 	}
 }

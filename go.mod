@@ -1,4 +1,4 @@
-module github.com/CodeIdeal/VasDolly-go
+module github.com/CodeIdeal/apktag
 
 go 1.23
 

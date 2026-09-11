@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	vasdolly "github.com/CodeIdeal/VasDolly-go"
+	apktag "github.com/CodeIdeal/apktag"
 )
 
 func makeCLIAPK(t *testing.T, path string) []byte {
@@ -98,7 +98,7 @@ func TestCLIPutGetRemoveWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := vasdolly.ReadChannel(bytes.NewReader(cleanedData), int64(len(cleanedData))); err == nil {
+	if _, err := apktag.ReadChannel(bytes.NewReader(cleanedData), int64(len(cleanedData))); err == nil {
 		t.Fatal("removed CLI artifact still contains a channel")
 	}
 	if got, err := os.ReadFile(basePath); err != nil || !bytes.Equal(got, base) {
@@ -149,7 +149,7 @@ func TestCLIHelp(t *testing.T) {
 }
 
 func TestParseBlockID(t *testing.T) {
-	tests := map[string]uint32{"VasDolly": vasdolly.ChannelPairID, "walle": vasdolly.WallePairID, "0x881155FF": vasdolly.ChannelPairID}
+	tests := map[string]uint32{"VasDolly": apktag.ChannelPairID, "walle": apktag.WallePairID, "0x881155FF": apktag.ChannelPairID}
 	for input, want := range tests {
 		got, err := parseBlockID(input)
 		if err != nil || got != want {
@@ -170,7 +170,7 @@ func TestParseBlockID(t *testing.T) {
 		"0x6dff800d",
 		"0x504b4453",
 	} {
-		if _, err := parseBlockID(input); !errors.Is(err, vasdolly.ErrReservedBlockID) {
+		if _, err := parseBlockID(input); !errors.Is(err, apktag.ErrReservedBlockID) {
 			t.Errorf("parseBlockID(%q) error = %v, want ErrReservedBlockID", input, err)
 		}
 	}

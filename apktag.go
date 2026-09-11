@@ -1,11 +1,11 @@
-// Package vasdolly reads, writes, and removes VasDolly channel metadata from
-// Android APK files without re-signing them.
-package vasdolly
+// Package apktag reads, writes, and removes channel metadata from Android APK
+// files without re-signing them, supporting VasDolly and Walle formats.
+package apktag
 
 import (
 	"io"
 
-	"github.com/CodeIdeal/VasDolly-go/internal/core"
+	"github.com/CodeIdeal/apktag/internal/core"
 )
 
 // Mode selects the channel storage scheme.
@@ -74,7 +74,7 @@ func Detect(r io.ReaderAt, size int64) (Detection, error) {
 	return core.Detect(r, size)
 }
 
-// ReadChannel reads VasDolly channel metadata from an APK.
+// ReadChannel reads channel metadata from an APK, trying VasDolly, Walle, then V1.
 func ReadChannel(r io.ReaderAt, size int64) (string, error) {
 	return core.ReadChannel(r, size)
 }

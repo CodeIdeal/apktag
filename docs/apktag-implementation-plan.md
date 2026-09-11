@@ -1,8 +1,8 @@
-# 纯 Go VasDolly 多渠道打包实现计划
+# apktag 纯 Go 多渠道打包实现计划
 
 ## Summary
 
-在当前仓库基础上实现一个 `github.com/CodeIdeal/VasDolly-go` Go module，提供库与 CLI 两种使用方式：
+在当前仓库基础上实现一个 `github.com/CodeIdeal/apktag` Go module，提供库与 CLI 两种使用方式：
 
 - 支持 VasDolly 兼容的 V1、V2、V3 渠道写入和读取。
 - 默认自动检测 APK 签名模式，也允许显式指定 `v1` 或 `v2`；`v2` 模式覆盖 V2/V3 Signing Block。
@@ -115,21 +115,21 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 
 ## CLI
 
-新增 `cmd/vasdolly`，兼容 VasDolly 的主要命令：
+新增 `cmd/apktag`，兼容 VasDolly 的主要命令：
 
 ```text
-vasdolly put -c "channel1,channel2" base.apk out-dir/
-vasdolly put -c channels.txt base.apk out-dir/
-vasdolly put --mode v1 -c channels.txt base.apk out-dir/
-vasdolly put --mode v2 --block-id Walle -c channels.txt base.apk out-dir/
+apktag put -c "channel1,channel2" base.apk out-dir/
+apktag put -c channels.txt base.apk out-dir/
+apktag put --mode v1 -c channels.txt base.apk out-dir/
+apktag put --mode v2 --block-id Walle -c channels.txt base.apk out-dir/
 
-vasdolly get -c channel.apk
-vasdolly get -c channel.apk --block-id Walle
-vasdolly get -s channel.apk
+apktag get -c channel.apk
+apktag get -c channel.apk --block-id Walle
+apktag get -s channel.apk
 
-vasdolly remove -c channel.apk
-vasdolly remove --mode v2 channel.apk cleaned.apk
-vasdolly remove --block-id Walle channel.apk cleaned.apk
+apktag remove -c channel.apk
+apktag remove --mode v2 channel.apk cleaned.apk
+apktag remove --block-id Walle channel.apk cleaned.apk
 ```
 
 约定：

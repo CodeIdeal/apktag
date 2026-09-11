@@ -31,25 +31,25 @@ type archive struct {
 
 func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 	if r == nil {
-		return nil, errors.New("vasdolly: nil ReaderAt")
+		return nil, errors.New("apktag: nil ReaderAt")
 	}
 	if size < zipEOCDMinSize {
-		return nil, fmt.Errorf("vasdolly: invalid APK size %d", size)
+		return nil, fmt.Errorf("apktag: invalid APK size %d", size)
 	}
 	if uint64(size) > uint64(maxInt()) {
-		return nil, fmt.Errorf("vasdolly: APK too large: %d", size)
+		return nil, fmt.Errorf("apktag: APK too large: %d", size)
 	}
 	ds := datasource.NewReaderAt(r, size)
 	eocd, err := zippkg.FindEOCD(ds)
 	if err != nil {
-		return nil, fmt.Errorf("vasdolly: find EOCD: %w", err)
+		return nil, fmt.Errorf("apktag: find EOCD: %w", err)
 	}
 	if err := validateEOCD(ds, eocd, size); err != nil {
 		return nil, err
 	}
 	entries, err := zippkg.ParseCD(ds, eocd)
 	if err != nil {
-		return nil, fmt.Errorf("vasdolly: parse central directory: %w", err)
+		return nil, fmt.Errorf("apktag: parse central directory: %w", err)
 	}
 	if err := validateEntries(ds, eocd, entries); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 	block, blockErr := apksigblock.Find(ds, eocd)
 	if blockErr != nil {
 		if signingFooterPresent(ds, eocd) || signingBlockCandidatePresent(ds, eocd) {
-			return nil, fmt.Errorf("vasdolly: malformed APK Signing Block: %w", blockErr)
+			return nil, fmt.Errorf("apktag: malformed APK Signing Block: %w", blockErr)
 		}
 		block = nil
 	}
@@ -69,16 +69,16 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 		for _, entry := range entries {
 			dataOffset, entryErr := zippkg.EntryDataOffset(ds, &entry)
 			if entryErr != nil {
-				return nil, fmt.Errorf("vasdolly: entry %q: %w", entry.Name, entryErr)
+				return nil, fmt.Errorf("apktag: entry %q: %w", entry.Name, entryErr)
 			}
 			if dataOffset+int64(entry.CompressedSize) > block.StartOffset {
-				return nil, fmt.Errorf("vasdolly: entry %q overlaps APK Signing Block", entry.Name)
+				return nil, fmt.Errorf("apktag: entry %q overlaps APK Signing Block", entry.Name)
 			}
 		}
 	}
 	data, err := datasource.ReadAll(ds)
 	if err != nil {
-		return nil, fmt.Errorf("vasdolly: read APK: %w", err)
+		return nil, fmt.Errorf("apktag: read APK: %w", err)
 	}
 	return &archive{data: data, ds: datasource.NewBytes(data), eocd: eocd, block: block, entries: entries}, nil
 }
@@ -89,33 +89,33 @@ func maxInt() int {
 
 func validateEOCD(ds datasource.DataSource, eocd *zippkg.EOCD, size int64) error {
 	if eocd == nil || len(eocd.Bytes) < zipEOCDMinSize {
-		return errors.New("vasdolly: malformed EOCD")
+		return errors.New("apktag: malformed EOCD")
 	}
 	if eocd.Offset < 0 || eocd.Offset+int64(len(eocd.Bytes)) != size {
-		return errors.New("vasdolly: EOCD does not terminate at EOF")
+		return errors.New("apktag: EOCD does not terminate at EOF")
 	}
 	if eocd.CDStartOffset < 0 || eocd.CDSize < 0 || eocd.CDStartOffset > eocd.Offset || eocd.CDSize > eocd.Offset-eocd.CDStartOffset {
-		return errors.New("vasdolly: central directory is outside APK")
+		return errors.New("apktag: central directory is outside APK")
 	}
 	if eocd.CDStartOffset+eocd.CDSize != eocd.Offset {
-		return errors.New("vasdolly: central directory is not adjacent to EOCD")
+		return errors.New("apktag: central directory is not adjacent to EOCD")
 	}
 	if binary.LittleEndian.Uint16(eocd.Bytes[4:6]) != 0 || binary.LittleEndian.Uint16(eocd.Bytes[6:8]) != 0 || binary.LittleEndian.Uint16(eocd.Bytes[8:10]) != binary.LittleEndian.Uint16(eocd.Bytes[10:12]) {
-		return errors.New("vasdolly: multi-disk ZIP is unsupported")
+		return errors.New("apktag: multi-disk ZIP is unsupported")
 	}
 	if binary.LittleEndian.Uint16(eocd.Bytes[8:10]) == ^uint16(0) || binary.LittleEndian.Uint32(eocd.Bytes[12:16]) == ^uint32(0) || binary.LittleEndian.Uint32(eocd.Bytes[16:20]) == ^uint32(0) {
-		return errors.New("vasdolly: ZIP64 APK is unsupported")
+		return errors.New("apktag: ZIP64 APK is unsupported")
 	}
 	if eocd.Offset >= 20 {
 		var locator [4]byte
 		if _, err := ds.ReadAt(locator[:], eocd.Offset-20); err == nil && binary.LittleEndian.Uint32(locator[:]) == zip64Locator {
-			return errors.New("vasdolly: ZIP64 APK is unsupported")
+			return errors.New("apktag: ZIP64 APK is unsupported")
 		}
 	}
 	if eocd.Offset >= 56 {
 		var marker [4]byte
 		if _, err := ds.ReadAt(marker[:], eocd.Offset-56); err == nil && binary.LittleEndian.Uint32(marker[:]) == zip64EOCD {
-			return errors.New("vasdolly: ZIP64 APK is unsupported")
+			return errors.New("apktag: ZIP64 APK is unsupported")
 		}
 	}
 	return nil
@@ -126,28 +126,28 @@ func validateEntries(ds datasource.DataSource, eocd *zippkg.EOCD, entries []zipp
 	for i := range entries {
 		entry := &entries[i]
 		if entry.HeaderSize < 46 || entry.LFHOffset < 0 || entry.LFHOffset >= eocd.CDStartOffset {
-			return fmt.Errorf("vasdolly: central directory entry %d has invalid offset", i)
+			return fmt.Errorf("apktag: central directory entry %d has invalid offset", i)
 		}
 		if totalCD > eocd.CDSize-entry.HeaderSize {
-			return fmt.Errorf("vasdolly: central directory entry %d overflows", i)
+			return fmt.Errorf("apktag: central directory entry %d overflows", i)
 		}
 		totalCD += entry.HeaderSize
 		dataOff, err := zippkg.EntryDataOffset(ds, entry)
 		if err != nil {
-			return fmt.Errorf("vasdolly: entry %q: %w", entry.Name, err)
+			return fmt.Errorf("apktag: entry %q: %w", entry.Name, err)
 		}
 		if dataOff < 0 || dataOff > ds.Size() || uint64(entry.CompressedSize) > uint64(ds.Size()-dataOff) {
-			return fmt.Errorf("vasdolly: entry %q data is outside APK", entry.Name)
+			return fmt.Errorf("apktag: entry %q data is outside APK", entry.Name)
 		}
 		if dataOff+int64(entry.CompressedSize) > eocd.CDStartOffset {
-			return fmt.Errorf("vasdolly: entry %q overlaps central directory", entry.Name)
+			return fmt.Errorf("apktag: entry %q overlaps central directory", entry.Name)
 		}
 	}
 	if totalCD != eocd.CDSize {
-		return fmt.Errorf("vasdolly: central directory has %d trailing bytes", eocd.CDSize-totalCD)
+		return fmt.Errorf("apktag: central directory has %d trailing bytes", eocd.CDSize-totalCD)
 	}
 	if len(entries) == 0 && eocd.CDSize != 0 {
-		return errors.New("vasdolly: non-empty central directory has no entries")
+		return errors.New("apktag: non-empty central directory has no entries")
 	}
 	return nil
 }
@@ -188,22 +188,22 @@ func signingBlockCandidatePresent(ds datasource.DataSource, eocd *zippkg.EOCD) b
 
 func validateBlock(ds datasource.DataSource, eocd *zippkg.EOCD, block *apksigblock.Block) error {
 	if block.StartOffset < 0 || block.StartOffset > eocd.CDStartOffset || block.CDOffset != eocd.CDStartOffset {
-		return errors.New("vasdolly: APK Signing Block has invalid offsets")
+		return errors.New("apktag: APK Signing Block has invalid offsets")
 	}
 	if block.StartOffset > ds.Size()-8 {
-		return errors.New("vasdolly: APK Signing Block starts outside APK")
+		return errors.New("apktag: APK Signing Block starts outside APK")
 	}
 	seenPadding := false
 	seenKnown := make(map[uint32]bool)
 	for _, pair := range block.Pairs {
 		if pair.ID == apksigblock.IDPaddingPair {
 			if seenPadding {
-				return errors.New("vasdolly: duplicate APK Signing Block padding pair")
+				return errors.New("apktag: duplicate APK Signing Block padding pair")
 			}
 			if len(pair.Value) > 0 {
 				for _, value := range pair.Value {
 					if value != 0 {
-						return errors.New("vasdolly: APK Signing Block padding is not zero-filled")
+						return errors.New("apktag: APK Signing Block padding is not zero-filled")
 					}
 				}
 			}
@@ -213,7 +213,7 @@ func validateBlock(ds datasource.DataSource, eocd *zippkg.EOCD, block *apksigblo
 		case apksigblock.IDV2Signature, apksigblock.IDV3Signature, apksigblock.IDV31Signature,
 			apksigblock.IDSourceStampV1, apksigblock.IDSourceStampV2, apksigblock.IDDependencyInfo, channelPairID:
 			if seenKnown[pair.ID] {
-				return fmt.Errorf("vasdolly: duplicate APK Signing Block pair 0x%08x", pair.ID)
+				return fmt.Errorf("apktag: duplicate APK Signing Block pair 0x%08x", pair.ID)
 			}
 			seenKnown[pair.ID] = true
 		}

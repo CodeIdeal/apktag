@@ -19,18 +19,18 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		return nil, err
 	}
 	if basePath == "" {
-		return nil, errors.New("vasdolly: base APK path is empty")
+		return nil, errors.New("apktag: base APK path is empty")
 	}
 	baseData, err := os.ReadFile(basePath)
 	if err != nil {
-		return nil, fmt.Errorf("vasdolly: read base APK: %w", err)
+		return nil, fmt.Errorf("apktag: read base APK: %w", err)
 	}
 	normalized, err := normalizeChannels(channels)
 	if err != nil {
 		return nil, err
 	}
 	if len(normalized) == 0 {
-		return nil, errors.New("vasdolly: no channels supplied")
+		return nil, errors.New("apktag: no channels supplied")
 	}
 	baseName := filepath.Base(basePath)
 	if strings.EqualFold(filepath.Ext(baseName), ".apk") {
@@ -41,14 +41,14 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		outputDir = "."
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("vasdolly: create output directory: %w", err)
+		return nil, fmt.Errorf("apktag: create output directory: %w", err)
 	}
 	pattern := opts.OutputPattern
 	if pattern == "" {
 		pattern = "{channel}-{base}.apk"
 	}
 	if filepath.IsAbs(pattern) {
-		return nil, errors.New("vasdolly: output pattern must be relative")
+		return nil, errors.New("apktag: output pattern must be relative")
 	}
 	paths := make([]string, len(normalized))
 	seenPaths := make(map[string]struct{}, len(paths))
@@ -56,25 +56,25 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	for i, channel := range normalized {
 		name := strings.NewReplacer("{channel}", channel, "{base}", baseName).Replace(pattern)
 		if name == "" || filepath.IsAbs(name) {
-			return nil, errors.New("vasdolly: output pattern generated an invalid path")
+			return nil, errors.New("apktag: output pattern generated an invalid path")
 		}
 		clean := filepath.Clean(filepath.Join(outputDir, name))
 		if !withinDir(outputDir, clean) {
-			return nil, fmt.Errorf("vasdolly: output path escapes output directory: %s", clean)
+			return nil, fmt.Errorf("apktag: output path escapes output directory: %s", clean)
 		}
 		absolutePath, _ := filepath.Abs(clean)
 		if absoluteBase != "" && absolutePath == absoluteBase {
-			return nil, errors.New("vasdolly: output path must differ from base APK")
+			return nil, errors.New("apktag: output path must differ from base APK")
 		}
 		if _, exists := seenPaths[clean]; exists {
-			return nil, fmt.Errorf("vasdolly: output pattern collision at %s", clean)
+			return nil, fmt.Errorf("apktag: output pattern collision at %s", clean)
 		}
 		seenPaths[clean] = struct{}{}
 		if !opts.Overwrite {
 			if _, statErr := os.Stat(clean); statErr == nil {
-				return nil, fmt.Errorf("vasdolly: output exists: %s", clean)
+				return nil, fmt.Errorf("apktag: output exists: %s", clean)
 			} else if !errors.Is(statErr, os.ErrNotExist) {
-				return nil, fmt.Errorf("vasdolly: inspect output %s: %w", clean, statErr)
+				return nil, fmt.Errorf("apktag: inspect output %s: %w", clean, statErr)
 			}
 		}
 		paths[i] = clean
@@ -195,7 +195,7 @@ func atomicWrite(path string, data []byte, overwrite bool) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(dir, ".vasdolly-*")
+	temporary, err := os.CreateTemp(dir, ".apktag-*")
 	if err != nil {
 		return err
 	}
