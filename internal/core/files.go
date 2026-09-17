@@ -10,21 +10,36 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/CodeIdeal/apktag/internal/logging"
 )
 
 // PackFiles creates one independent artifact per channel. The base APK is
 // loaded once and is never modified. Results retain the input channel order.
-func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifact, error) {
+func PackFiles(basePath string, channels []string, opts BatchOptions) (artifacts []Artifact, err error) {
+	op := logging.Start("pack_files", "base_path", basePath, "block_id", normalizeBlockID(opts.BlockID))
+	var errorReported bool
+	defer func() {
+		if errorReported {
+			op.FinishReported(err)
+		} else {
+			op.Finish(err)
+		}
+	}()
+	op.Step("validate_options")
 	if err := ValidateBlockID(opts.BlockID); err != nil {
 		return nil, err
 	}
 	if basePath == "" {
 		return nil, errors.New("apktag: base APK path is empty")
 	}
+	op.Step("read_base")
 	baseData, err := os.ReadFile(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("apktag: read base APK: %w", err)
 	}
+	op.Info("base APK read", "bytes", len(baseData))
+	op.Step("normalize_channels")
 	normalized, err := normalizeChannels(channels)
 	if err != nil {
 		return nil, err
@@ -32,6 +47,8 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	if len(normalized) == 0 {
 		return nil, errors.New("apktag: no channels supplied")
 	}
+	op.Info("channels normalized", "input_count", len(channels), "channel_count", len(normalized))
+	op.Step("prepare_paths")
 	baseName := filepath.Base(basePath)
 	if strings.EqualFold(filepath.Ext(baseName), ".apk") {
 		baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
@@ -80,7 +97,7 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		paths[i] = clean
 	}
 
-	baseArchive, err := loadArchive(bytes.NewReader(baseData), int64(len(baseData)))
+	baseArchive, err := loadArchiveWithLog(bytes.NewReader(baseData), int64(len(baseData)), op)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +112,8 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	if workers > len(normalized) {
 		workers = len(normalized)
 	}
+	op.Step("process_channels")
+	op.Info("batch workers started", "workers", workers, "channel_count", len(normalized))
 	type result struct {
 		index    int
 		artifact Artifact
@@ -108,14 +127,15 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		go func() {
 			defer group.Done()
 			for index := range jobs {
+				child := op.Child("pack_channel", "channel", normalized[index], "path", paths[index])
 				var buffer bytes.Buffer
-				transformOpts := opts.TransformOptions
-				if err := Pack(bytes.NewReader(baseData), int64(len(baseData)), normalized[index], &buffer, transformOpts); err != nil {
-					results <- result{index: index, err: fmt.Errorf("channel %q: %w", normalized[index], err)}
-					continue
+				channelErr := pack(bytes.NewReader(baseData), int64(len(baseData)), normalized[index], &buffer, opts.TransformOptions, child)
+				if channelErr == nil {
+					channelErr = atomicWrite(paths[index], buffer.Bytes(), opts.Overwrite, child)
 				}
-				if err := atomicWrite(paths[index], buffer.Bytes(), opts.Overwrite); err != nil {
-					results <- result{index: index, err: fmt.Errorf("channel %q: %w", normalized[index], err)}
+				child.Finish(channelErr)
+				if channelErr != nil {
+					results <- result{index: index, err: fmt.Errorf("channel %q: %w", normalized[index], channelErr)}
 					continue
 				}
 				results <- result{index: index, artifact: Artifact{Channel: normalized[index], Path: paths[index], Mode: mode}}
@@ -130,18 +150,23 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		group.Wait()
 		close(results)
 	}()
-	artifacts := make([]Artifact, len(normalized))
+	artifacts = make([]Artifact, len(normalized))
+	succeeded, failed := 0, 0
 	var firstErr error
 	for item := range results {
 		if item.err != nil {
+			failed++
 			if firstErr == nil {
 				firstErr = item.err
 			}
 			continue
 		}
+		succeeded++
 		artifacts[item.index] = item.artifact
 	}
+	op.Info("batch finished", "succeeded", succeeded, "failed", failed, "total", len(normalized))
 	if firstErr != nil {
+		errorReported = true
 		return nil, firstErr
 	}
 	return artifacts, nil
@@ -190,7 +215,8 @@ func validateChannelName(channel string) error {
 	return nil
 }
 
-func atomicWrite(path string, data []byte, overwrite bool) error {
+func atomicWrite(path string, data []byte, overwrite bool, op *logging.Operation) error {
+	op.Step("create_temporary_file")
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -204,21 +230,27 @@ func atomicWrite(path string, data []byte, overwrite bool) error {
 	defer func() {
 		_ = temporary.Close()
 		if !keep {
-			_ = os.Remove(temporaryName)
+			cleanupErr := os.Remove(temporaryName)
+			op.Debug("temporary file cleanup", "temporary_path", temporaryName, "error", cleanupErr)
 		}
 	}()
+	op.Step("write_temporary_file")
 	if err := writeOutput(temporary, data); err != nil {
 		return err
 	}
+	op.Step("chmod_temporary_file")
 	if err := temporary.Chmod(0o644); err != nil {
 		return err
 	}
+	op.Step("sync_temporary_file")
 	if err := temporary.Sync(); err != nil {
 		return err
 	}
+	op.Step("close_temporary_file")
 	if err := temporary.Close(); err != nil {
 		return err
 	}
+	op.Step("check_overwrite")
 	if !overwrite {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("output exists: %s", path)
@@ -226,10 +258,12 @@ func atomicWrite(path string, data []byte, overwrite bool) error {
 			return err
 		}
 	}
+	op.Step("rename_output")
 	if err := os.Rename(temporaryName, path); err != nil {
 		return err
 	}
 	keep = true
+	op.Info("output committed", "path", path, "bytes", len(data), "status", "completed")
 	return nil
 }
 

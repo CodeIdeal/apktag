@@ -33,8 +33,9 @@ type interopCase struct {
 	log strings.Builder
 }
 type interopResult struct {
-	text string
-	err  error
+	text   string
+	stderr string
+	err    error
 }
 type interopOutput struct{ bytes.Buffer }
 
@@ -138,9 +139,9 @@ func (c *interopCase) run(args ...string) interopResult {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = c.dir
 	cmd.WaitDelay = time.Second
-	var log interopOutput
-	cmd.Stdout = &log
-	cmd.Stderr = &log
+	var stdout, stderr interopOutput
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	err := cmd.Run()
 	printable := append([]string(nil), args...)
 	for i, s := range printable {
@@ -148,16 +149,16 @@ func (c *interopCase) run(args ...string) interopResult {
 			printable[i] = fmt.Sprintf("%s…[%d bytes]", s[:100], len(s))
 		}
 	}
-	fmt.Fprintf(&c.log, "args=%q\nexit=%v\n%s\n", printable, err, log.String())
+	fmt.Fprintf(&c.log, "args=%q\nexit=%v\nstdout:\n%s\nstderr:\n%s\n", printable, err, stdout.String(), stderr.String())
 	if ctx.Err() != nil {
 		c.t.Fatalf("process timed out: %q", printable)
 	}
-	return interopResult{log.String(), err}
+	return interopResult{text: stdout.String(), stderr: stderr.String(), err: err}
 }
 func (c *interopCase) must(r interopResult) string {
 	c.t.Helper()
 	if r.err != nil {
-		c.t.Fatalf("command failed: %v\n%s", r.err, r.text)
+		c.t.Fatalf("command failed: %v\n%s", r.err, r.text+r.stderr)
 	}
 	return r.text
 }
@@ -251,7 +252,7 @@ func (c *interopCase) checkRead(path, tool, want string) {
 func (c *interopCase) absent(path, tool string) {
 	c.t.Helper()
 	r := c.appRead(path, tool)
-	if r.err == nil || !strings.Contains(r.text, "channel not found") {
+	if r.err == nil || !strings.Contains(r.text+r.stderr, "channel not found") {
 		c.t.Fatalf("expected absent channel: %+v", r)
 	}
 	if got := c.jarValue(path, tool); got != "" {

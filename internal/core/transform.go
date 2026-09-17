@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/CodeIdeal/apktag/internal/logging"
 	"github.com/agusibrahim/apksig-go/pkg/apksigblock"
 )
 
@@ -36,6 +37,7 @@ func verifySelected(a *archive, mode Mode) error {
 	default:
 		return ErrInvalidMode
 	}
+	a.log.Info("selected signature verified", "mode", mode, "verified", true)
 	return nil
 }
 
@@ -54,14 +56,20 @@ func hasPairID(a *archive, id uint32) bool {
 // Pack adds channel metadata to an APK and writes the result to w. The input
 // ReaderAt is never modified. Set VerifyInput to verify the selected signing
 // scheme before writing; structural checks always run.
-func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts TransformOptions) error {
+func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts TransformOptions) (err error) {
+	op := logging.Start("pack", "channel", channel, "bytes", size, "block_id", normalizeBlockID(opts.BlockID))
+	defer func() { op.Finish(err) }()
+	return pack(r, size, channel, w, opts, op)
+}
+func pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts TransformOptions, op *logging.Operation) error {
+	op.Step("validate_options")
 	if w == nil {
 		return errors.New("apktag: nil Writer")
 	}
 	if err := ValidateBlockID(opts.BlockID); err != nil {
 		return err
 	}
-	a, err := loadArchive(r, size)
+	a, err := loadArchiveWithLog(r, size, op)
 	if err != nil {
 		return err
 	}
@@ -73,6 +81,9 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 		if err := verifySelected(a, mode); err != nil {
 			return err
 		}
+	} else {
+		op.Step("verify_signature")
+		op.Info("signature verification skipped", "status", "skipped")
 	}
 	var output []byte
 	switch mode {
@@ -86,23 +97,27 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 	if err != nil {
 		return err
 	}
-	return writeOutput(w, output)
+	return writeOutputWithLog(w, output, op)
 }
 
 // RemoveChannel removes channel metadata according to opts. Auto mode removes
 // both V2/V3 and V1 metadata when both are present; explicit modes only touch
 // their selected representation.
-func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions) error {
+func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions) (err error) {
+	op := logging.Start("remove", "bytes", size, "block_id", normalizeBlockID(opts.BlockID))
+	defer func() { op.Finish(err) }()
+	op.Step("validate_options")
 	if w == nil {
 		return errors.New("apktag: nil Writer")
 	}
 	if err := ValidateBlockID(opts.BlockID); err != nil {
 		return err
 	}
-	a, err := loadArchive(r, size)
+	a, err := loadArchiveWithLog(r, size, op)
 	if err != nil {
 		return err
 	}
+	op.Step("normalize_mode")
 	requested, err := normalizeMode(opts.Mode)
 	if err != nil {
 		return err
@@ -115,7 +130,11 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 		if err := verifySelected(a, mode); err != nil {
 			return err
 		}
+	} else {
+		op.Step("verify_signature")
+		op.Info("signature verification skipped", "status", "skipped")
 	}
+	op.Step("locate_channel")
 	if requested != ModeAuto {
 		var output []byte
 		if mode == ModeV1 {
@@ -126,7 +145,7 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 		if err != nil {
 			return err
 		}
-		return writeOutput(w, output)
+		return writeOutputWithLog(w, output, op)
 	}
 
 	hasV2, hasV3 := archiveModernPairs(a)
@@ -151,7 +170,7 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 	}
 	if v1Found {
 		if hasModern {
-			next, loadErr := loadArchive(bytes.NewReader(output), int64(len(output)))
+			next, loadErr := loadArchiveWithLog(bytes.NewReader(output), int64(len(output)), op)
 			if loadErr != nil {
 				return loadErr
 			}
@@ -163,5 +182,5 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 			return err
 		}
 	}
-	return writeOutput(w, output)
+	return writeOutputWithLog(w, output, op)
 }

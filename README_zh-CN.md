@@ -57,6 +57,44 @@ apktag remove -c huawei-app.apk --block-id Walle cleaned.apk
 
 V2/V3 打包时，`--block-id` 支持 `VasDolly`（默认值 `0x881155FF`）、`Walle`（`0x71777777`）或自定义 32 位十六进制 ID。Walle 的 payload 必须是包含非空字符串 `channel` 字段的 JSON 对象；读取已有渠道包时允许存在额外字段。
 
+## 日志
+
+通过 `apktag.SetLogger(*slog.Logger)` 注入库使用的全局 logger。未注入或调用
+`SetLogger(nil)` 后，每次新操作使用当前 `slog.Default()`，不会修改宿主程序的
+slog 默认 logger。
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+})).With("service", "packaging")
+apktag.SetLogger(logger)
+// 正常调用 Pack、PackFiles、Detect、ReadChannel 或 RemoveChannel。
+apktag.SetLogger(nil) // 恢复使用当前 slog.Default()。
+```
+
+设置 logger 支持并发调用。操作及其所有批量 worker 持有开始时的 logger 快照，
+更换 logger 只影响新操作。自定义 Handler 必须支持并发调用。需要静默时应注入
+禁用相应级别的 Handler；传入 `nil` 不会关闭日志。
+
+Info 记录操作开始/结束、模式选择、验签结果或明确的跳过状态、文件提交及批量
+成功/失败数量；Debug 增加阶段耗时、ZIP/Signing Block 结构和临时文件操作；
+Warn 输出检测及验签警告；Error 标明失败操作和渠道。结构化字段按场景包含
+operation、stage、status、duration、渠道、路径、大小和模式，不输出 APK 内容或签名 payload。
+
+CLI **默认新增输出到 stderr 的 Info 日志**，stdout 保留原有机器可读结果。
+三个子命令均支持 `--log-level debug|info|warn|error|off`，参数放在位置参数前：
+
+```sh
+apktag put --log-level debug -c huawei,xiaomi app.apk dist/
+apktag get --log-level off channel.apk
+apktag remove --log-level warn channel.apk cleaned.apk
+```
+
+`off` 关闭结构化日志，失败提示和退出码仍保留。批量处理中单个渠道失败后继续
+处理其他渠道，并记录各渠道结果；函数仍返回收集到的第一个错误，CLI 仅在整批
+成功时向 stdout 打印路径。原先合并 stdout/stderr 的调用方应分别捕获两者，
+或指定 `--log-level off`。
+
 ## Development
 
 ```text

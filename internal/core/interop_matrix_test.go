@@ -125,7 +125,7 @@ func (c *interopCase) reject(base, tool, ch string, extra ...string) {
 	args = append(args, base)
 	r := c.app(args...)
 	if r.err == nil {
-		c.t.Fatalf("invalid input accepted: %s", r.text)
+		c.t.Fatalf("invalid input accepted: %s", r.text+r.stderr)
 	}
 	if string(c.read(out)) != "sentinel" {
 		c.t.Fatal("rejected write clobbered destination")
@@ -155,8 +155,8 @@ func (h *interopHarness) v1Cases(t *testing.T, base []byte) {
 			jar := filepath.Join(c.dir, "jar.apk")
 			r := c.put("vas", tc.ch, src, jar)
 			c.must(r)
-			if !strings.Contains(r.text, "only ignore") {
-				t.Fatalf("expected VasDolly V1 writer limitation: %s", r.text)
+			if !strings.Contains(r.text+r.stderr, "only ignore") {
+				t.Fatalf("expected VasDolly V1 writer limitation: %s", r.text+r.stderr)
 			}
 			if len(c.read(jar)) != 0 {
 				t.Fatal("VasDolly V1 unexpectedly wrote an APK")
@@ -197,8 +197,8 @@ func (h *interopHarness) v1Cases(t *testing.T, base []byte) {
 		out := filepath.Join(c.dir, "out.apk")
 		r := c.jar("walle", "put", "-c", "alpha", src, out)
 		c.must(r)
-		if !strings.Contains(r.text, "SignatureNotFoundException") {
-			t.Fatalf("Walle V1 unsupported result: %s", r.text)
+		if !strings.Contains(r.text+r.stderr, "SignatureNotFoundException") {
+			t.Fatalf("Walle V1 unsupported result: %s", r.text+r.stderr)
 		}
 		c.compare(base, c.read(out), 0, true)
 	})
@@ -230,7 +230,7 @@ func (h *interopHarness) inputCases(t *testing.T, base []byte) {
 				out := filepath.Join(c.dir, "jar.apk")
 				r := c.put(tool, ch, src, out)
 				c.must(r)
-				t.Logf("reference result: %s", r.text)
+				t.Logf("reference result: %s", r.text+r.stderr)
 			})
 		}
 		t.Run("input/trim/"+tool, func(t *testing.T) {
@@ -257,7 +257,7 @@ func (h *interopHarness) inputCases(t *testing.T, base []byte) {
 				jar := filepath.Join(c.dir, "jar.apk")
 				r := c.put(tool, ch, first, jar)
 				c.must(r)
-				t.Logf("duplicate reference: %s", r.text)
+				t.Logf("duplicate reference: %s", r.text+r.stderr)
 			})
 		}
 		t.Run("input/remove_absent/"+tool, func(t *testing.T) {
@@ -375,7 +375,7 @@ func (h *interopHarness) metadataCases(t *testing.T, base []byte) {
 			}
 			r := c.jarRead(path, "walle")
 			c.must(r)
-			t.Logf("reference invalid %s: %q", tc.name, r.text)
+			t.Logf("reference invalid %s: %q", tc.name, r.text+r.stderr)
 		})
 	}
 }
@@ -399,7 +399,7 @@ func (h *interopHarness) badCases(t *testing.T, v1, base, mixed []byte) {
 			for _, tool := range []string{"vas", "walle"} {
 				input := c.write(tool+"-base.apk", tc.data)
 				r := c.put(tool, "alpha", input, filepath.Join(c.dir, tool+".apk"))
-				t.Logf("%s malformed exit=%v output=%.1400s", tool, r.err, r.text)
+				t.Logf("%s malformed exit=%v output=%.1400s", tool, r.err, r.text+r.stderr)
 				c.compare(tc.data, c.read(input), 0, true)
 			}
 		})

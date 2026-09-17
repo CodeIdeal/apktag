@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/CodeIdeal/apktag/internal/logging"
 	"github.com/agusibrahim/apksig-go/pkg/apksigblock"
 	"github.com/agusibrahim/apksig-go/pkg/apkverifier"
 	"github.com/agusibrahim/apksig-go/pkg/datasource"
@@ -22,6 +23,7 @@ const (
 )
 
 type archive struct {
+	log     *logging.Operation
 	data    []byte
 	ds      datasource.DataSource
 	eocd    *zippkg.EOCD
@@ -30,6 +32,10 @@ type archive struct {
 }
 
 func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
+	return loadArchiveWithLog(r, size, nil)
+}
+func loadArchiveWithLog(r io.ReaderAt, size int64, op *logging.Operation) (*archive, error) {
+	op.Step("archive_input")
 	if r == nil {
 		return nil, errors.New("apktag: nil ReaderAt")
 	}
@@ -40,6 +46,7 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 		return nil, fmt.Errorf("apktag: APK too large: %d", size)
 	}
 	ds := datasource.NewReaderAt(r, size)
+	op.Step("eocd")
 	eocd, err := zippkg.FindEOCD(ds)
 	if err != nil {
 		return nil, fmt.Errorf("apktag: find EOCD: %w", err)
@@ -47,6 +54,8 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 	if err := validateEOCD(ds, eocd, size); err != nil {
 		return nil, err
 	}
+	op.Debug("EOCD located", "offset", eocd.Offset, "cd_offset", eocd.CDStartOffset)
+	op.Step("central_directory")
 	entries, err := zippkg.ParseCD(ds, eocd)
 	if err != nil {
 		return nil, fmt.Errorf("apktag: parse central directory: %w", err)
@@ -55,6 +64,8 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 		return nil, err
 	}
 
+	op.Debug("central directory validated", "entries", len(entries))
+	op.Step("signing_block")
 	block, blockErr := apksigblock.Find(ds, eocd)
 	if blockErr != nil {
 		if signingFooterPresent(ds, eocd) || signingBlockCandidatePresent(ds, eocd) {
@@ -76,11 +87,15 @@ func loadArchive(r io.ReaderAt, size int64) (*archive, error) {
 			}
 		}
 	}
+	if block != nil {
+		op.Debug("signing block validated", "offset", block.StartOffset, "pairs", len(block.Pairs))
+	}
+	op.Step("read_archive")
 	data, err := datasource.ReadAll(ds)
 	if err != nil {
 		return nil, fmt.Errorf("apktag: read APK: %w", err)
 	}
-	return &archive{data: data, ds: datasource.NewBytes(data), eocd: eocd, block: block, entries: entries}, nil
+	return &archive{log: op, data: data, ds: datasource.NewBytes(data), eocd: eocd, block: block, entries: entries}, nil
 }
 
 func maxInt() int {
@@ -222,7 +237,17 @@ func validateBlock(ds datasource.DataSource, eocd *zippkg.EOCD, block *apksigblo
 }
 
 func verifyArchive(a *archive) (*apkverifier.Result, error) {
+	a.log.Step("verify_signature")
 	res, err := apkverifier.Verify(a.ds, 0, 0)
+	if res != nil {
+		for _, warning := range res.Warnings {
+			a.log.Warn("signature warning", "warning", warning)
+		}
+		for _, issue := range res.Errors {
+			a.log.Warn("signature issue", "warning", issue)
+		}
+		a.log.Info("signature verification result", "verified", res.Verified, "status", "checked")
+	}
 	if err != nil {
 		return res, err
 	}

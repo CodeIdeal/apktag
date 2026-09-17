@@ -95,6 +95,7 @@ func channelPair(block *apksigblock.Block, id uint32) (value []byte, found bool,
 }
 
 func writeV2(a *archive, channel string, id uint32) ([]byte, error) {
+	a.log.Step("write_v2_channel")
 	if err := ValidateBlockID(id); err != nil {
 		return nil, err
 	}
@@ -141,6 +142,7 @@ func writeV2(a *archive, channel string, id uint32) ([]byte, error) {
 }
 
 func removeV2(a *archive, id uint32) ([]byte, error) {
+	a.log.Step("remove_v2_channel")
 	if err := ValidateBlockID(id); err != nil {
 		return nil, err
 	}
@@ -218,6 +220,7 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 }
 
 func rewriteBlock(a *archive, pairs []apksigblock.Pair) ([]byte, error) {
+	a.log.Step("rewrite_signing_block")
 	blockBytes, err := assembleSigningBlock(pairs)
 	if err != nil {
 		return nil, err
@@ -226,6 +229,7 @@ func rewriteBlock(a *archive, pairs []apksigblock.Pair) ([]byte, error) {
 	if newCDOffset < 0 || uint64(newCDOffset) > uint64(^uint32(0)) {
 		return nil, errors.New("apktag: central directory offset exceeds ZIP limits")
 	}
+	a.log.Debug("signing block rebuilt", "bytes", len(blockBytes), "pairs", len(pairs), "old_cd_offset", a.eocd.CDStartOffset, "cd_offset", newCDOffset, "padding_bytes", len(blockBytes)-signingBlockUnpaddedSize(pairs))
 	cdStart := int(a.eocd.CDStartOffset)
 	cdEnd := cdStart + int(a.eocd.CDSize)
 	eocd := append([]byte(nil), a.data[int(a.eocd.Offset):]...)
@@ -236,4 +240,12 @@ func rewriteBlock(a *archive, pairs []apksigblock.Pair) ([]byte, error) {
 	out = append(out, a.data[cdStart:cdEnd]...)
 	out = append(out, eocd...)
 	return out, nil
+}
+
+func signingBlockUnpaddedSize(pairs []apksigblock.Pair) int {
+	size := 8 + 24 + 12
+	for _, pair := range pairs {
+		size += 12 + len(pair.Value)
+	}
+	return size
 }

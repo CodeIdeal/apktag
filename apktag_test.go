@@ -4,6 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 
 	apktag "github.com/CodeIdeal/apktag"
@@ -48,4 +51,39 @@ func makeTestAPK(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return output.Bytes()
+}
+
+func TestSetLoggerAndDefault(t *testing.T) {
+	oldDefault := slog.Default()
+	t.Cleanup(func() { apktag.SetLogger(nil); slog.SetDefault(oldDefault) })
+	var defaults, injected, replacement bytes.Buffer
+	defaultLogger := slog.New(slog.NewJSONHandler(&defaults, nil))
+	slog.SetDefault(defaultLogger)
+	apktag.SetLogger(nil)
+	input := makeTestAPK(t)
+	pack := func() {
+		t.Helper()
+		if err := apktag.Pack(bytes.NewReader(input), int64(len(input)), "store", io.Discard, apktag.TransformOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pack()
+	if defaults.Len() == 0 {
+		t.Fatal("nil did not use slog.Default")
+	}
+	defaults.Reset()
+	apktag.SetLogger(slog.New(slog.NewJSONHandler(&injected, nil)).With("caller", "public"))
+	pack()
+	if defaults.Len() != 0 || !strings.Contains(injected.String(), `"caller":"public"`) {
+		t.Fatal("injection was not honored")
+	}
+	if slog.Default() != defaultLogger {
+		t.Fatal("SetLogger changed slog.Default")
+	}
+	apktag.SetLogger(nil)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&replacement, nil)))
+	pack()
+	if replacement.Len() == 0 {
+		t.Fatal("nil did not follow the current slog.Default")
+	}
 }

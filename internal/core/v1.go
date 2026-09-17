@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"unicode/utf8"
+
+	"github.com/CodeIdeal/apktag/internal/logging"
 )
 
 // V1Marker terminates the VasDolly V1 ZIP comment suffix.
@@ -61,6 +63,7 @@ func parseV1Comment(comment []byte) (channel string, found bool, err error) {
 }
 
 func writeV1(a *archive, channel string) ([]byte, error) {
+	a.log.Step("write_v1_channel")
 	channelBytes, err := validateV1Channel(channel)
 	if err != nil {
 		return nil, err
@@ -92,6 +95,7 @@ func writeV1(a *archive, channel string) ([]byte, error) {
 }
 
 func removeV1(a *archive) ([]byte, error) {
+	a.log.Step("remove_v1_channel")
 	_, found, err := parseV1Comment(v1Comment(a))
 	if err != nil {
 		return nil, err
@@ -110,6 +114,7 @@ func removeV1(a *archive) ([]byte, error) {
 }
 
 func readV1(a *archive) (string, error) {
+	a.log.Step("read_v1_channel")
 	channel, found, err := parseV1Comment(v1Comment(a))
 	if err != nil {
 		return "", err
@@ -136,5 +141,14 @@ func writeOutput(w io.Writer, data []byte) error {
 			return io.ErrShortWrite
 		}
 	}
+	return nil
+}
+
+func writeOutputWithLog(w io.Writer, data []byte, op *logging.Operation) error {
+	op.Step("write_output")
+	if err := writeOutput(w, data); err != nil {
+		return err
+	}
+	op.Debug("output bytes written", "bytes", len(data))
 	return nil
 }

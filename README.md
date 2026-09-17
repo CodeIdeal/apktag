@@ -59,6 +59,49 @@ For V2/V3 packaging, `--block-id` accepts `VasDolly` (the default, `0x881155FF`)
 
 V4 `.idsig` files, AAB files, APK re-signing, and Source Stamp regeneration are outside the project scope. After modifying an APK with a V4 signature, the caller is responsible for regenerating its sidecar file.
 
+## Logging
+
+`apktag.SetLogger(*slog.Logger)` injects a process-wide logger for the library.
+Without injection, or after `SetLogger(nil)`, each new operation uses the current
+`slog.Default()`. This does not modify the host application's slog default.
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+})).With("service", "packaging")
+apktag.SetLogger(logger)
+// Call Pack, PackFiles, Detect, ReadChannel, or RemoveChannel as usual.
+apktag.SetLogger(nil) // Return to the current slog.Default().
+```
+
+Setting the logger is concurrency-safe. An operation and all its batch workers
+retain the logger captured at operation start; replacement affects new operations.
+Custom Handlers must support concurrent calls. To silence library logging, inject
+a logger whose Handler disables the desired levels; `nil` does not disable logs.
+
+Info records operation lifecycle, mode selection, signature verification (or its
+explicit skip), committed outputs, and batch success/failure counts. Debug adds
+stage timing, ZIP/Signing Block structure and temporary-file operations. Warn
+reports detection/verification warnings; Error identifies failed operations and
+channels. Records include operation/stage/status/duration as applicable, plus
+channel, path, size and mode fields. APK contents and signature payloads are not logged.
+
+The CLI **now logs at Info to stderr by default**. stdout retains its original
+machine-readable results. All three subcommands accept `--log-level` with
+`debug`, `info`, `warn`, `error`, or `off`, before positional arguments:
+
+```sh
+apktag put --log-level debug -c huawei,xiaomi app.apk dist/
+apktag get --log-level off channel.apk
+apktag remove --log-level warn channel.apk cleaned.apk
+```
+
+`off` disables structured logs but preserves failure messages and exit codes.
+Batch processing continues after individual failures and logs every channel result;
+the function still returns the first collected error, and CLI stdout lists paths
+only when the entire batch succeeds. Consumers that previously combined stdout
+and stderr should capture them separately or select `--log-level off`.
+
 ## Development
 
 ```text

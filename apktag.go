@@ -4,8 +4,10 @@ package apktag
 
 import (
 	"io"
+	"log/slog"
 
 	"github.com/CodeIdeal/apktag/internal/core"
+	"github.com/CodeIdeal/apktag/internal/logging"
 )
 
 // Mode selects the channel storage scheme.
@@ -90,3 +92,9 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifact, error) {
 	return core.PackFiles(basePath, channels, opts)
 }
+
+// SetLogger injects the logger used by future operations. Nil restores use of
+// slog.Default(). It is safe to call concurrently; in-flight operations retain
+// their logger snapshot, including all batch workers. SetLogger does not change
+// the host application's slog default. Handlers must support concurrent calls.
+func SetLogger(logger *slog.Logger) { logging.SetLogger(logger) }

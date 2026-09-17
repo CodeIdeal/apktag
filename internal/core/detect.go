@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/CodeIdeal/apktag/internal/logging"
 	"github.com/agusibrahim/apksig-go/pkg/apksigblock"
 	zippkg "github.com/agusibrahim/apksig-go/pkg/zip"
 )
@@ -22,7 +23,13 @@ func normalizeMode(mode Mode) (Mode, error) {
 	}
 }
 
-func selectedMode(a *archive, requested Mode) (Mode, error) {
+func selectedMode(a *archive, requested Mode) (selected Mode, err error) {
+	a.log.Step("select_mode")
+	defer func() {
+		if err == nil {
+			a.log.Info("mode selected", "mode", selected, "requested_mode", requested)
+		}
+	}()
 	mode, err := normalizeMode(requested)
 	if err != nil {
 		return "", err
@@ -51,6 +58,7 @@ func selectedMode(a *archive, requested Mode) (Mode, error) {
 }
 
 func detectArchive(a *archive) (Detection, error) {
+	a.log.Step("detect_signatures")
 	var detection Detection
 	hasV2, hasV3 := archiveModernPairs(a)
 	detection.HasV2 = hasV2
@@ -59,12 +67,14 @@ func detectArchive(a *archive) (Detection, error) {
 	detection.HasV1 = hasV1Signature(a.entries)
 	if _, _, err := parseV1Comment(v1Comment(a)); err != nil {
 		detection.Warnings = append(detection.Warnings, err.Error())
+		a.log.Warn("channel metadata warning", "warning", err.Error())
 	}
 	if hasV2 || hasV3 {
 		detection.Mode = ModeV2
 	} else {
 		detection.Mode = ModeV1
 	}
+	a.log.Info("mode detected", "mode", detection.Mode, "v1", detection.HasV1, "v2", detection.HasV2, "v3", detection.HasV3, "v31", detection.HasV31)
 	verification, err := verifyArchive(a)
 	if err != nil {
 		return detection, err
@@ -113,8 +123,10 @@ func archiveModernPairs(a *archive) (hasV2, hasV3 bool) {
 	return modernPair(a.block.Pairs)
 }
 
-func Detect(r io.ReaderAt, size int64) (Detection, error) {
-	a, err := loadArchive(r, size)
+func Detect(r io.ReaderAt, size int64) (result Detection, err error) {
+	op := logging.Start("detect", "bytes", size)
+	defer func() { op.Finish(err) }()
+	a, err := loadArchiveWithLog(r, size, op)
 	if err != nil {
 		return Detection{}, err
 	}
@@ -125,16 +137,20 @@ func ReadChannel(r io.ReaderAt, size int64) (string, error) {
 	return ReadChannelWithBlockID(r, size, 0)
 }
 
-func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, error) {
+func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (channel string, err error) {
+	op := logging.Start("read_channel", "bytes", size, "block_id", blockID)
+	defer func() { op.Finish(err) }()
+	op.Step("validate_options")
 	if blockID != 0 {
 		if err := ValidateBlockID(blockID); err != nil {
 			return "", err
 		}
 	}
-	a, err := loadArchive(r, size)
+	a, err := loadArchiveWithLog(r, size, op)
 	if err != nil {
 		return "", err
 	}
+	op.Step("read_v2_channel")
 	if a.block != nil {
 		if blockID != 0 {
 			id := normalizeBlockID(blockID)
@@ -155,6 +171,7 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 				return string(value), nil
 			}
 			// A V1 channel remains the fallback when the requested pair is absent.
+			op.Debug("falling back to V1 channel")
 			return readV1(a)
 		}
 		if value, found, err := channelPair(a.block, ChannelPairID); err != nil {
@@ -174,5 +191,6 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 			return object.Channel, nil
 		}
 	}
+	op.Debug("falling back to V1 channel")
 	return readV1(a)
 }
