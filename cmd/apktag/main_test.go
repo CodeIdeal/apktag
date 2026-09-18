@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -82,17 +83,19 @@ func TestCLIPutGetRemoveWorkflow(t *testing.T) {
 	for _, channel := range []string{"one", "two"} {
 		path := filepath.Join(dist, channel+"-base.apk")
 		getOutput, getErr := captureRun(t, "get", "-c", path)
-		if getErr != nil || strings.TrimSpace(getOutput) != channel {
-			t.Fatalf("get %s = %q, %v", channel, getOutput, getErr)
+		wantChannel := fmt.Sprintf("Channel: %s,len=%d", channel, len(channel))
+		if getErr != nil || !strings.Contains(getOutput, wantChannel) {
+			t.Fatalf("get %s = %q, want channel line %q, err: %v", channel, getOutput, wantChannel, getErr)
 		}
 	}
 	status, err := captureRun(t, "get", "-s", filepath.Join(dist, "one-base.apk"))
-	if err != nil || !strings.Contains(status, "mode=v1") || !strings.Contains(status, "v1=false") {
+	if err != nil || !strings.Contains(status, "signature mode:") || !strings.Contains(status, "Verified using v1 scheme") {
 		t.Fatalf("status = %q, %v", status, err)
 	}
 	cleaned := filepath.Join(dir, "cleaned.apk")
-	if _, err := captureRun(t, "remove", "-c", filepath.Join(dist, "one-base.apk"), "--no-verify", cleaned); err != nil {
-		t.Fatal(err)
+	removeOutput, err := captureRun(t, "remove", "-c", filepath.Join(dist, "one-base.apk"), "--no-verify", cleaned)
+	if err != nil || !strings.Contains(removeOutput, "remove channel success") {
+		t.Fatalf("remove output = %q, %v", removeOutput, err)
 	}
 	cleanedData, err := os.ReadFile(cleaned)
 	if err != nil {
@@ -122,6 +125,23 @@ func TestCLISingleOutputOverwriteAndFailures(t *testing.T) {
 	}
 	if _, err := captureRun(t, "get"); err == nil {
 		t.Fatal("get without an APK path succeeded")
+	}
+	if _, err := captureRun(t, "get", "-c", basePath); err == nil {
+		t.Fatal("get on APK without channel succeeded, want error")
+	}
+	corruptPath := filepath.Join(dir, "corrupt.apk")
+	if err := os.WriteFile(corruptPath, []byte("not a zip file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureRun(t, "get", "-s", corruptPath); err == nil {
+		t.Fatal("get -s on corrupt APK succeeded, want error")
+	}
+	inPlaceApk := filepath.Join(dir, "inplace.apk")
+	if _, err := captureRun(t, "put", "-c", "inplace_chan", "--mode", "v1", "--no-verify", "--overwrite", "--out", inPlaceApk, basePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureRun(t, "remove", "-c", inPlaceApk, "--no-verify"); err != nil {
+		t.Fatalf("in-place remove failed: %v", err)
 	}
 	if _, err := captureRun(t, "remove", "--mode", "invalid", outputPath); err == nil {
 		t.Fatal("invalid remove mode succeeded")

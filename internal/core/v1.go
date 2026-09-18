@@ -60,12 +60,17 @@ func parseV1Comment(comment []byte) (channel string, found bool, err error) {
 	return string(channelBytes), true, nil
 }
 
-func writeV1(a *archive, channel string) ([]byte, error) {
+func writeV1(a *archive, channel string, logger Logger, path string) ([]byte, error) {
 	channelBytes, err := validateV1Channel(channel)
 	if err != nil {
 		return nil, err
 	}
 	comment := v1Comment(a)
+	if len(comment) == 0 {
+		LogPrintf(logger, "file : %s , has no comment\n", path)
+	} else {
+		LogPrintf(logger, "file : %s , has comment\n", path)
+	}
 	if existing, found, err := parseV1Comment(comment); err != nil {
 		return nil, err
 	} else if found {
@@ -91,30 +96,43 @@ func writeV1(a *archive, channel string) ([]byte, error) {
 	return out, nil
 }
 
-func removeV1(a *archive) ([]byte, error) {
-	_, found, err := parseV1Comment(v1Comment(a))
+func removeV1(a *archive, logger Logger, apkName string) ([]byte, error) {
+	comment := v1Comment(a)
+	if len(comment) == 0 {
+		LogPrintf(logger, "file : %s , has no comment\n", apkName)
+	} else {
+		LogPrintf(logger, "file : %s , has comment\n", apkName)
+	}
+	_, found, err := parseV1Comment(comment)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return nil, ErrChannelNotFound
 	}
-	comment := v1Comment(a)
 	suffixLen := len(v1Marker) + 2 + int(binary.LittleEndian.Uint16(comment[len(comment)-len(v1Marker)-2:len(comment)-len(v1Marker)]))
 	prefixLen := len(comment) - suffixLen
 	commentStart := int(a.eocd.Offset) + 22
 	out := make([]byte, commentStart+prefixLen)
 	copy(out, a.data[:commentStart+prefixLen])
 	binary.LittleEndian.PutUint16(out[int(a.eocd.Offset)+20:int(a.eocd.Offset)+22], uint16(prefixLen))
+	LogPrintf(logger, "file : %s , remove comment success\n", apkName)
 	return out, nil
 }
 
-func readV1(a *archive) (string, error) {
-	channel, found, err := parseV1Comment(v1Comment(a))
+func readV1(a *archive, logger Logger, path string) (string, error) {
+	comment := v1Comment(a)
+	if len(comment) == 0 {
+		LogPrintf(logger, "file : %s , has no comment\n", path)
+	} else {
+		LogPrintf(logger, "file : %s , has comment\n", path)
+	}
+	channel, found, err := parseV1Comment(comment)
 	if err != nil {
 		return "", err
 	}
 	if !found {
+		LogPrintf(logger, "APK : %s not have channel info from Zip Comment\n", path)
 		return "", ErrChannelNotFound
 	}
 	return channel, nil

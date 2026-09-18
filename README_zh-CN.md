@@ -31,6 +31,24 @@ channel, err := apktag.ReadChannelWithBlockID(input, inputSize, apktag.WallePair
 
 `ModeAuto` 优先选择 V3/V2 Signing Block，否则使用 V1。设置 `VerifyInput: true` 可在写入前验证所选签名方案；结构检查始终执行。V1 模式拒绝带有 V2/V3 签名的混合 APK，避免破坏更强签名。
 
+### 日志输出 (Logging)
+
+作为 Go 依赖库使用时，默认静默无输出。若需输出与 VasDolly 格式一致的日志，可通过配置全局或单个操作的 Logger：
+
+```go
+// 输出与 VasDolly 一致的日志到标准输出
+apktag.SetOutput(os.Stdout)
+
+// 或自定义实现 Logger 接口
+apktag.SetLogger(customLogger)
+
+// 或在单次操作中传递 Logger
+opts := apktag.TransformOptions{
+    Mode:   apktag.ModeAuto,
+    Logger: customLogger,
+}
+```
+
 ## CLI
 
 从当前源码构建 CLI：

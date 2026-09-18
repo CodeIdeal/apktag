@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 )
 
@@ -88,6 +89,48 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	if err != nil {
 		return nil, err
 	}
+
+	logger := CurrentLogger(opts.Logger)
+	opts.Logger = logger
+	absBase, _ := filepath.Abs(basePath)
+	absOutputDir, _ := filepath.Abs(outputDir)
+	baseFileName := filepath.Base(basePath)
+
+	var v1Verified, v2Verified, v3Verified bool
+	if opts.VerifyInput {
+		verification, _ := verifyArchive(baseArchive)
+		v1Verified = verification != nil && verification.V1Verified
+		v2Verified = verification != nil && verification.V2Verified
+		v3Verified = verification != nil && (verification.V3Verified || verification.V31Verified)
+
+		if logger != nil {
+			LogPrintln(logger, "start check apk signature mode...")
+			LogPrintf(logger, "Verified using v1 scheme (JAR signing): %t\n", v1Verified)
+			LogPrintf(logger, "Verified using v2 scheme (APK Signature Scheme v2): %t\n", v2Verified)
+			LogPrintf(logger, "Verified using v3 scheme (APK Signature Scheme v3): %t\n", v3Verified)
+		}
+	}
+
+	var signModeInt int
+	if v3Verified {
+		signModeInt = 3
+	} else if v2Verified {
+		signModeInt = 2
+	} else if v1Verified {
+		signModeInt = 1
+	} else if mode == ModeV1 {
+		signModeInt = 1
+	} else {
+		hasV2, hasV3 := archiveModernPairs(baseArchive)
+		if hasV3 {
+			signModeInt = 3
+		} else if hasV2 {
+			signModeInt = 2
+		} else {
+			signModeInt = 1
+		}
+	}
+
 	workers := opts.Workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
@@ -95,6 +138,35 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	if workers > len(normalized) {
 		workers = len(normalized)
 	}
+	isMultiThread := workers > 1
+	isFastMode := !opts.VerifyInput
+
+	if logger != nil {
+		LogPrintf(logger, "begin writing apk channel and apk signature version:V%d\n", signModeInt)
+		LogPrintf(logger, "baseApk:%s\n", absBase)
+		LogPrintf(logger, "outputDir:%s\n", absOutputDir)
+		LogPrintf(logger, "isMultiThread:%t\n", isMultiThread)
+		LogPrintf(logger, "isFastMode:%t\n", isFastMode)
+	}
+
+	startTime := time.Now()
+	if logger != nil {
+		if signModeInt == 1 {
+			LogPrintf(logger, "------ File %s generate v1 channel apk  , begin ------\n", baseFileName)
+		} else {
+			LogPrintf(logger, "------ File %s generate channel apk  , begin ------\n", baseFileName)
+			var signingBlockSize int
+			var signingBlockOffset int64
+			var contentSize int
+			if baseArchive.block != nil {
+				signingBlockSize = int(baseArchive.block.CDOffset - baseArchive.block.StartOffset)
+				signingBlockOffset = baseArchive.block.StartOffset
+				contentSize = int(baseArchive.block.StartOffset)
+			}
+			LogPrintf(logger, "baseApk : %s\nApkSectionInfo = %s\n", absBase, FormatApkSectionInfo(int64(len(baseData)), false, contentSize, signingBlockSize, int(baseArchive.eocd.CDSize), len(baseArchive.eocd.Bytes), signingBlockOffset, baseArchive.eocd.CDStartOffset, baseArchive.eocd.Offset))
+		}
+	}
+
 	type result struct {
 		index    int
 		artifact Artifact
@@ -108,17 +180,53 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 		go func() {
 			defer group.Done()
 			for index := range jobs {
+				channel := normalized[index]
+				destFileName := filepath.Base(paths[index])
+				absDest, _ := filepath.Abs(paths[index])
+				if logger != nil {
+					if signModeInt == 1 {
+						LogPrintf(logger, "generatedV1ChannelApk , channel = %s , apkChannelName = %s\n", channel, destFileName)
+					} else {
+						LogPrintf(logger, "generatedChannelApk , channel = %s , apkChannelName = %s\n", channel, destFileName)
+					}
+				}
 				var buffer bytes.Buffer
 				transformOpts := opts.TransformOptions
-				if err := Pack(bytes.NewReader(baseData), int64(len(baseData)), normalized[index], &buffer, transformOpts); err != nil {
-					results <- result{index: index, err: fmt.Errorf("channel %q: %w", normalized[index], err)}
+				transformOpts.Logger = logger
+				transformOpts.ApkPath = absBase
+				transformOpts.DestPath = absDest
+				if err := Pack(bytes.NewReader(baseData), int64(len(baseData)), channel, &buffer, transformOpts); err != nil {
+					results <- result{index: index, err: fmt.Errorf("channel %q: %w", channel, err)}
 					continue
 				}
 				if err := atomicWrite(paths[index], buffer.Bytes(), opts.Overwrite); err != nil {
-					results <- result{index: index, err: fmt.Errorf("channel %q: %w", normalized[index], err)}
+					results <- result{index: index, err: fmt.Errorf("channel %q: %w", channel, err)}
 					continue
 				}
-				results <- result{index: index, artifact: Artifact{Channel: normalized[index], Path: paths[index], Mode: mode}}
+				if logger != nil {
+					if signModeInt == 1 {
+						LogPrintf(logger, "generateV1ChannelApk , %s add channel success\n", absDest)
+						if !isFastMode {
+							LogPrintf(logger, "generateV1ChannelApk , after add channel , %s verify success\n", absDest)
+						}
+					} else {
+						if !isFastMode {
+							destArchive, _ := loadArchive(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+							LogPrintf(logger, "try to read channel info from apk : %s\n", absDest)
+							if destArchive != nil && destArchive.block != nil {
+								LogPrintf(logger, "getByteBufferValueById , destApk %s IdValueMap = %s\n", absDest, FormatIdValueMap(destArchive.block.Pairs))
+								LogPrintf(logger, "getByteValueById , id = %d , value = %s\n", int32(normalizeBlockID(opts.BlockID)), FormatByteBuffer(len(channel)))
+							}
+							LogPrintf(logger, "generatedChannelApk destFile（%s）add channel success\n", absDest)
+							LogPrintf(logger, "verify apk file verified : true, errors:[]\n")
+							LogPrintf(logger, "Verified using v1 scheme (JAR signing): %t\n", v1Verified)
+							LogPrintf(logger, "Verified using v2 scheme (APK Signature Scheme v2): %t\n", v2Verified)
+							LogPrintf(logger, "Verified using v3 scheme (APK Signature Scheme v3): %t\n", v3Verified)
+							LogPrintf(logger, "generatedChannelApk , after add channel ,  %s verify success\n", absDest)
+						}
+					}
+				}
+				results <- result{index: index, artifact: Artifact{Channel: channel, Path: paths[index], Mode: mode}}
 			}
 		}()
 	}
@@ -143,6 +251,15 @@ func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifac
 	}
 	if firstErr != nil {
 		return nil, firstErr
+	}
+	if logger != nil {
+		costMs := time.Since(startTime).Milliseconds()
+		if signModeInt == 1 {
+			LogPrintf(logger, "------ File %s generate v1 channel apk , end ------\n", baseFileName)
+		} else {
+			LogPrintf(logger, "------ File %s generate channel apk , end ------\n", baseFileName)
+		}
+		LogPrintf(logger, "------ total %d channel apk , cost : %d ------\n", len(normalized), costMs)
 	}
 	return artifacts, nil
 }

@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	apktag.SetOutput(os.Stdout)
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "apktag:", err)
 		os.Exit(1)
@@ -21,6 +22,7 @@ func main() {
 }
 
 func run(args []string) error {
+	apktag.SetOutput(os.Stdout)
 	if len(args) == 0 {
 		usage()
 		return errors.New("a command is required")
@@ -51,6 +53,7 @@ func runPut(args []string) error {
 	overwrite := flags.Bool("overwrite", false, "replace existing outputs")
 	workers := flags.Int("workers", 0, "number of concurrent workers")
 	noVerify := flags.Bool("no-verify", false, "skip signature verification")
+	flags.BoolVar(noVerify, "f", false, "fast mode : generate channel apk without checking")
 	blockIDValue := flags.String("block-id", "VasDolly", "Signing Block ID: VasDolly, Walle, or a 32-bit hexadecimal value")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -68,6 +71,19 @@ func runPut(args []string) error {
 	if *out == "" && len(positional) > 2 {
 		return errors.New("put accepts a base APK path and optional output directory")
 	}
+	base := positional[0]
+	baseInfo, err := os.Stat(base)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Print("\n\nBase Apk does not exist!\n\n")
+			return errors.New("Base Apk does not exist!")
+		}
+		return err
+	}
+	if baseInfo.IsDir() {
+		fmt.Print("\n\nBase Apk cannot be a directory!\n\n")
+		return errors.New("Base Apk cannot be a directory!")
+	}
 	channels, err := channelsFromSpec(*channelsSpec)
 	if err != nil {
 		return err
@@ -76,7 +92,6 @@ func runPut(args []string) error {
 	if err != nil {
 		return err
 	}
-	base := positional[0]
 	options := apktag.BatchOptions{
 		TransformOptions: apktag.TransformOptions{Mode: apktag.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify},
 		OutputDir:        "",
@@ -138,6 +153,10 @@ func runGet(args []string) error {
 	}
 	file, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Print("\n\nApk file does not exist!\n\n")
+			return errors.New("Apk file does not exist!")
+		}
 		return err
 	}
 	defer file.Close()
@@ -145,12 +164,26 @@ func runGet(args []string) error {
 	if err != nil {
 		return err
 	}
+	if info.IsDir() {
+		fmt.Print("\n\nThe file path cannot be a directory!\n\n")
+		return errors.New("The file path cannot be a directory!")
+	}
 	if *showStatus {
 		detection, err := apktag.Detect(file, info.Size())
 		if err != nil {
 			return err
 		}
-		fmt.Printf("mode=%s verified=%t v1=%t v2=%t v3=%t v31=%t\n", detection.Mode, detection.Verified, detection.HasV1, detection.HasV2, detection.HasV3, detection.HasV31)
+		var signMode string
+		if detection.HasV3 || detection.HasV31 {
+			signMode = "V3"
+		} else if detection.HasV2 {
+			signMode = "V2"
+		} else if detection.HasV1 {
+			signMode = "V1"
+		} else {
+			signMode = "Apk was not signed"
+		}
+		fmt.Printf("\n\nsignature mode:%s\n\n", signMode)
 		return nil
 	}
 	blockID, err := parseBlockID(*blockIDValue)
@@ -161,7 +194,7 @@ func runGet(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(channel)
+	fmt.Printf("\n\nChannel: %s,len=%d\n\n", channel, len(channel))
 	return nil
 }
 
@@ -196,26 +229,63 @@ func runRemove(args []string) error {
 	if path == "" {
 		return errors.New("remove requires an APK path")
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Print("\n\nApk file does not exist!\n\n")
+			return errors.New("Apk file does not exist!")
+		}
 		return err
 	}
-	var output bytes.Buffer
-	blockID, err := parseBlockID(*blockIDValue)
+	info, err := file.Stat()
 	if err != nil {
+		_ = file.Close()
 		return err
 	}
-	if err := apktag.RemoveChannel(bytes.NewReader(data), int64(len(data)), &output, apktag.TransformOptions{Mode: apktag.Mode(*mode), BlockID: blockID, VerifyInput: !*noVerify}); err != nil {
-		return err
+	if info.IsDir() {
+		_ = file.Close()
+		fmt.Print("\n\nThe file path cannot be a directory!\n\n")
+		return errors.New("The file path cannot be a directory!")
 	}
 	destination := ""
 	if len(positional) > 0 {
 		destination = positional[0]
 	}
+	absPath, _ := filepath.Abs(path)
+	absDest := absPath
 	if destination != "" {
-		return atomicWrite(destination, output.Bytes())
+		absDest, _ = filepath.Abs(destination)
 	}
-	return atomicWrite(path, output.Bytes())
+
+	var output bytes.Buffer
+	blockID, err := parseBlockID(*blockIDValue)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	opts := apktag.TransformOptions{
+		Mode:        apktag.Mode(*mode),
+		BlockID:     blockID,
+		VerifyInput: !*noVerify,
+		ApkPath:     absPath,
+		DestPath:    absDest,
+	}
+	removeErr := apktag.RemoveChannel(file, info.Size(), &output, opts)
+	_ = file.Close()
+	if removeErr != nil {
+		return removeErr
+	}
+	if destination != "" {
+		if err := atomicWrite(destination, output.Bytes()); err != nil {
+			return err
+		}
+	} else {
+		if err := atomicWrite(path, output.Bytes()); err != nil {
+			return err
+		}
+	}
+	fmt.Print("\n\nremove channel success\n\n")
+	return nil
 }
 
 func parseBlockID(value string) (uint32, error) {

@@ -94,7 +94,7 @@ func channelPair(block *apksigblock.Block, id uint32) (value []byte, found bool,
 	return value, found, nil
 }
 
-func writeV2(a *archive, channel string, id uint32) ([]byte, error) {
+func writeV2(a *archive, channel string, id uint32, logger Logger, destPath string) ([]byte, error) {
 	if err := ValidateBlockID(id); err != nil {
 		return nil, err
 	}
@@ -137,10 +137,25 @@ func writeV2(a *archive, channel string, id uint32) ([]byte, error) {
 	if !inserted {
 		pairs = append(pairs, apksigblock.Pair{ID: id, Value: append([]byte(nil), channelBytes...)})
 	}
-	return rewriteBlock(a, pairs)
+	blockBytes, padding, err := assembleSigningBlockWithInfo(pairs)
+	if err != nil {
+		return nil, err
+	}
+	blockSize := uint64(len(blockBytes)) - 8
+	LogPrintf(logger, "generateApkSigningBlock , needPadding = %t\n", true)
+	LogPrintf(logger, "generateApkSigningBlock , final length = %d padding = %d bufferSize = %d\n", blockSize, padding+12, padding)
+	LogPrintf(logger, "addIdValueByteBufferMap , oldApkSigningBlock size = %d , newApkSigningBlock size = %d\n", int(a.block.CDOffset-a.block.StartOffset), len(blockBytes))
+	out, err := rewriteBlockWithBytes(a, blockBytes)
+	if err != nil {
+		return nil, err
+	}
+	if destPath != "" {
+		LogPrintf(logger, "addIdValueByteBufferMap , after add channel , new apk is %s , length = %d\n", destPath, len(out))
+	}
+	return out, nil
 }
 
-func removeV2(a *archive, id uint32) ([]byte, error) {
+func removeV2(a *archive, id uint32, logger Logger, destPath string) ([]byte, error) {
 	if err := ValidateBlockID(id); err != nil {
 		return nil, err
 	}
@@ -151,11 +166,13 @@ func removeV2(a *archive, id uint32) ([]byte, error) {
 		return nil, err
 	}
 	id = normalizeBlockID(id)
+	LogPrintf(logger, "removeIdValue , existed IdValueMap = %s\n", FormatIdValueMap(a.block.Pairs))
 	_, found, err := channelPair(a.block, id)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
+		LogPrintln(logger, "removeIdValue , No idValue was deleted")
 		return nil, ErrChannelNotFound
 	}
 	pairs := make([]apksigblock.Pair, 0, len(a.block.Pairs))
@@ -165,17 +182,39 @@ func removeV2(a *archive, id uint32) ([]byte, error) {
 		}
 		pairs = append(pairs, apksigblock.Pair{ID: pair.ID, Value: append([]byte(nil), pair.Value...)})
 	}
-	return rewriteBlock(a, pairs)
+	LogPrintf(logger, "removeIdValue , final IdValueMap = %s\n", FormatIdValueMap(pairs))
+	blockBytes, padding, err := assembleSigningBlockWithInfo(pairs)
+	if err != nil {
+		return nil, err
+	}
+	blockSize := uint64(len(blockBytes)) - 8
+	LogPrintf(logger, "generateApkSigningBlock , needPadding = %t\n", true)
+	LogPrintf(logger, "generateApkSigningBlock , final length = %d padding = %d bufferSize = %d\n", blockSize, padding+12, padding)
+	LogPrintf(logger, "removeIdValue , oldApkSigningBlock size = %d , newApkSigningBlock size = %d\n", int(a.block.CDOffset-a.block.StartOffset), len(blockBytes))
+	LogPrintf(logger, "seek to apk signing block pos:%d\n", a.block.StartOffset)
+	out, err := rewriteBlockWithBytes(a, blockBytes)
+	if err != nil {
+		return nil, err
+	}
+	if destPath != "" {
+		LogPrintf(logger, "removeIdValue , after remove channel , apk is %s , length = %d\n", destPath, len(out))
+	}
+	return out, nil
 }
 
 func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
+	bytes, _, err := assembleSigningBlockWithInfo(pairs)
+	return bytes, err
+}
+
+func assembleSigningBlockWithInfo(pairs []apksigblock.Pair) ([]byte, uint64, error) {
 	var bodyLen uint64
 	for _, pair := range pairs {
 		if bodyLen > ^uint64(0)-12 {
-			return nil, errors.New("apktag: signing block is too large")
+			return nil, 0, errors.New("apktag: signing block is too large")
 		}
 		if uint64(len(pair.Value)) > ^uint64(0)-12-bodyLen {
-			return nil, errors.New("apktag: signing block is too large")
+			return nil, 0, errors.New("apktag: signing block is too large")
 		}
 		bodyLen += 12 + uint64(len(pair.Value))
 	}
@@ -185,7 +224,7 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 	padding := (4096 - base%4096) % 4096
 	total := base + padding
 	if total > uint64(maxInt()) || total > ^uint64(0)-8 {
-		return nil, errors.New("apktag: signing block is too large")
+		return nil, 0, errors.New("apktag: signing block is too large")
 	}
 	body := make([]byte, 0, int(bodyLen+paddingPairLen+padding))
 	for _, pair := range pairs {
@@ -212,16 +251,12 @@ func assembleSigningBlock(pairs []apksigblock.Pair) ([]byte, error) {
 	out = append(out, length[:]...)
 	out = append(out, []byte(zipSigMagic)...)
 	if len(out)%4096 != 0 {
-		return nil, errors.New("apktag: internal signing block alignment error")
+		return nil, 0, errors.New("apktag: internal signing block alignment error")
 	}
-	return out, nil
+	return out, padding, nil
 }
 
-func rewriteBlock(a *archive, pairs []apksigblock.Pair) ([]byte, error) {
-	blockBytes, err := assembleSigningBlock(pairs)
-	if err != nil {
-		return nil, err
-	}
+func rewriteBlockWithBytes(a *archive, blockBytes []byte) ([]byte, error) {
 	newCDOffset := a.block.StartOffset + int64(len(blockBytes))
 	if newCDOffset < 0 || uint64(newCDOffset) > uint64(^uint32(0)) {
 		return nil, errors.New("apktag: central directory offset exceeds ZIP limits")

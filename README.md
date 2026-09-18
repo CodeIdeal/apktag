@@ -31,6 +31,24 @@ channel, err := apktag.ReadChannelWithBlockID(input, inputSize, apktag.WallePair
 
 `ModeAuto` prefers a V3/V2 APK Signing Block and falls back to V1. Set `VerifyInput: true` to verify the selected signing scheme before writing; structural validation is always performed. V1 mode rejects APKs that also contain V2/V3 signatures to avoid invalidating the stronger signature.
 
+### Logging
+
+By default, the library does not produce log output. To enable VasDolly-compatible logging, set an output writer or custom logger:
+
+```go
+// Direct logs to stdout (matching VasDolly format)
+apktag.SetOutput(os.Stdout)
+
+// Or provide a custom Logger implementation
+apktag.SetLogger(customLogger)
+
+// Or specify a logger per operation
+opts := apktag.TransformOptions{
+    Mode:   apktag.ModeAuto,
+    Logger: customLogger,
+}
+```
+
 ## CLI
 
 Build the CLI from this checkout:

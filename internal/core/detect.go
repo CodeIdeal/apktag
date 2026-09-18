@@ -50,7 +50,7 @@ func selectedMode(a *archive, requested Mode) (Mode, error) {
 	}
 }
 
-func detectArchive(a *archive) (Detection, error) {
+func detectArchive(a *archive, logger Logger) (Detection, error) {
 	var detection Detection
 	hasV2, hasV3 := archiveModernPairs(a)
 	detection.HasV2 = hasV2
@@ -75,6 +75,12 @@ func detectArchive(a *archive) (Detection, error) {
 	}
 	if len(verification.Errors) > 0 {
 		detection.Warnings = append(detection.Warnings, verification.Errors...)
+	}
+	if logger != nil {
+		LogPrintln(logger, "start check apk signature mode...")
+		LogPrintf(logger, "Verified using v1 scheme (JAR signing): %t\n", verification.V1Verified)
+		LogPrintf(logger, "Verified using v2 scheme (APK Signature Scheme v2): %t\n", verification.V2Verified)
+		LogPrintf(logger, "Verified using v3 scheme (APK Signature Scheme v3): %t\n", verification.V3Verified || verification.V31Verified)
 	}
 	return detection, nil
 }
@@ -118,7 +124,7 @@ func Detect(r io.ReaderAt, size int64) (Detection, error) {
 	if err != nil {
 		return Detection{}, err
 	}
-	return detectArchive(a)
+	return detectArchive(a, CurrentLogger(nil))
 }
 
 func ReadChannel(r io.ReaderAt, size int64) (string, error) {
@@ -135,32 +141,42 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 	if err != nil {
 		return "", err
 	}
+	logger := CurrentLogger(nil)
+	path := readerPath(r)
+	LogPrintf(logger, "try to read channel info from apk : %s\n", path)
 	if a.block != nil {
+		LogPrintf(logger, "getByteBufferValueById , destApk %s IdValueMap = %s\n", path, FormatIdValueMap(a.block.Pairs))
 		if blockID != 0 {
 			id := normalizeBlockID(blockID)
 			value, found, err := channelPair(a.block, id)
 			if err != nil {
 				return "", err
 			}
-			if found && id == WallePairID {
-				var object struct {
-					Channel string `json:"channel"`
-				}
-				if err := json.Unmarshal(value, &object); err != nil {
-					return "", err
-				}
-				return object.Channel, nil
-			}
 			if found {
+				LogPrintf(logger, "getByteValueById , id = %d , value = %s\n", int32(id), FormatByteBuffer(len(value)))
+				if id == WallePairID {
+					var object struct {
+						Channel string `json:"channel"`
+					}
+					if err := json.Unmarshal(value, &object); err != nil {
+						return "", err
+					}
+					return object.Channel, nil
+				}
 				return string(value), nil
 			}
+			LogPrintf(logger, "getByteValueById , id = %d , value = null\n", int32(id))
 			// A V1 channel remains the fallback when the requested pair is absent.
-			return readV1(a)
+			return readV1(a, logger, path)
 		}
-		if value, found, err := channelPair(a.block, ChannelPairID); err != nil {
+		id := ChannelPairID
+		if value, found, err := channelPair(a.block, id); err != nil {
 			return "", err
 		} else if found {
+			LogPrintf(logger, "getByteValueById , id = %d , value = %s\n", int32(id), FormatByteBuffer(len(value)))
 			return string(value), nil
+		} else {
+			LogPrintf(logger, "getByteValueById , id = %d , value = null\n", int32(id))
 		}
 		if value, found, err := channelPair(a.block, WallePairID); err != nil {
 			return "", err
@@ -173,6 +189,8 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 			}
 			return object.Channel, nil
 		}
+	} else {
+		LogPrintf(logger, "APK : %s not have apk signature block\n", path)
 	}
-	return readV1(a)
+	return readV1(a, logger, path)
 }

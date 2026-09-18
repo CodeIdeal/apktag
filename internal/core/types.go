@@ -19,6 +19,15 @@ type TransformOptions struct {
 	// VerifyInput asks Pack and Remove to verify the selected signing scheme
 	// before transforming. Structural validation is always performed.
 	VerifyInput bool
+
+	// Logger receives VasDolly-compatible log messages. If nil, global logger is used.
+	Logger Logger
+
+	// ApkPath is an optional display path of the base APK for log messages.
+	ApkPath string
+
+	// DestPath is an optional display path of the target APK for log messages.
+	DestPath string
 }
 
 // BatchOptions controls PackFiles.

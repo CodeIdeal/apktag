@@ -90,3 +90,16 @@ func ReadChannelWithBlockID(r io.ReaderAt, size int64, blockID uint32) (string, 
 func PackFiles(basePath string, channels []string, opts BatchOptions) ([]Artifact, error) {
 	return core.PackFiles(basePath, channels, opts)
 }
+
+// Logger is the logging interface used by apktag.
+type Logger = core.Logger
+
+// SetLogger sets the package-level logger. Passing nil disables logging.
+func SetLogger(l Logger) {
+	core.SetLogger(l)
+}
+
+// SetOutput sets the destination for log messages. Passing nil or io.Discard disables logging.
+func SetOutput(w io.Writer) {
+	core.SetOutput(w)
+}

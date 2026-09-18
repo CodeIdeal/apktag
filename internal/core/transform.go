@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/agusibrahim/apksig-go/pkg/apksigblock"
 )
@@ -74,12 +75,28 @@ func Pack(r io.ReaderAt, size int64, channel string, w io.Writer, opts Transform
 			return err
 		}
 	}
+	logger := CurrentLogger(opts.Logger)
+	apkPath := opts.ApkPath
+	if apkPath == "" {
+		apkPath = readerPath(r)
+	}
+	if apkPath != "" {
+		if abs, err := filepath.Abs(apkPath); err == nil {
+			apkPath = abs
+		}
+	}
+	destPath := opts.DestPath
+	if destPath != "" {
+		if abs, err := filepath.Abs(destPath); err == nil {
+			destPath = abs
+		}
+	}
 	var output []byte
 	switch mode {
 	case ModeV1:
-		output, err = writeV1(a, channel)
+		output, err = writeV1(a, channel, logger, apkPath)
 	case ModeV2:
-		output, err = writeV2(a, channel, opts.BlockID)
+		output, err = writeV2(a, channel, opts.BlockID, logger, destPath)
 	default:
 		err = ErrInvalidMode
 	}
@@ -103,6 +120,39 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 	if err != nil {
 		return err
 	}
+	logger := CurrentLogger(opts.Logger)
+	if logger != nil && opts.VerifyInput {
+		LogPrintln(logger, "start check apk signature mode...")
+		verification, _ := verifyArchive(a)
+		v1Verified := verification != nil && verification.V1Verified
+		v2Verified := verification != nil && verification.V2Verified
+		v3Verified := verification != nil && (verification.V3Verified || verification.V31Verified)
+		LogPrintf(logger, "Verified using v1 scheme (JAR signing): %t\n", v1Verified)
+		LogPrintf(logger, "Verified using v2 scheme (APK Signature Scheme v2): %t\n", v2Verified)
+		LogPrintf(logger, "Verified using v3 scheme (APK Signature Scheme v3): %t\n", v3Verified)
+	}
+	apkPath := opts.ApkPath
+	if apkPath == "" {
+		apkPath = readerPath(r)
+	}
+	if apkPath != "" {
+		if abs, err := filepath.Abs(apkPath); err == nil {
+			apkPath = abs
+		}
+	}
+	destPath := opts.DestPath
+	if destPath == "" {
+		destPath = apkPath
+	}
+	if destPath != "" {
+		if abs, err := filepath.Abs(destPath); err == nil {
+			destPath = abs
+		}
+	}
+	baseName := filepath.Base(apkPath)
+	if a.block != nil && logger != nil {
+		LogPrintf(logger, "baseApk : %s\nApkSectionInfo = %s\n", apkPath, FormatApkSectionInfo(size, true, 0, int(a.block.CDOffset-a.block.StartOffset), int(a.eocd.CDSize), len(a.eocd.Bytes), a.block.StartOffset, a.eocd.CDStartOffset, a.eocd.Offset))
+	}
 	requested, err := normalizeMode(opts.Mode)
 	if err != nil {
 		return err
@@ -119,9 +169,9 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 	if requested != ModeAuto {
 		var output []byte
 		if mode == ModeV1 {
-			output, err = removeV1(a)
+			output, err = removeV1(a, logger, baseName)
 		} else {
-			output, err = removeV2(a, opts.BlockID)
+			output, err = removeV2(a, opts.BlockID, logger, destPath)
 		}
 		if err != nil {
 			return err
@@ -140,11 +190,15 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 		return pairErr
 	}
 	if !v2Found && !v1Found {
+		if logger != nil && a.block != nil {
+			LogPrintf(logger, "removeIdValue , existed IdValueMap = %s\n", FormatIdValueMap(a.block.Pairs))
+			LogPrintln(logger, "removeIdValue , No idValue was deleted")
+		}
 		return ErrChannelNotFound
 	}
 	output := a.data
 	if hasModern && v2Found {
-		output, err = removeV2(a, opts.BlockID)
+		output, err = removeV2(a, opts.BlockID, logger, destPath)
 		if err != nil {
 			return err
 		}
@@ -155,9 +209,9 @@ func RemoveChannel(r io.ReaderAt, size int64, w io.Writer, opts TransformOptions
 			if loadErr != nil {
 				return loadErr
 			}
-			output, err = removeV1(next)
+			output, err = removeV1(next, logger, baseName)
 		} else {
-			output, err = removeV1(a)
+			output, err = removeV1(a, logger, baseName)
 		}
 		if err != nil {
 			return err
